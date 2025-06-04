@@ -1,0 +1,2625 @@
+---
+editor: 
+  markdown: 
+    wrap: 72
+---
+
+# Epigenomics and RNAseq in R
+
+## To use this notebook
+
+1.  Go to `ood.ccv.brown.edu` (you will need an Oscar account).
+2.  Go to 'Clusters' in the blue menu bar at the top and click the
+    drop-down that says '\>\_OSCAR Shell Access'
+3.  Go to your home folder (`cd ~`)
+4.  Git clone the repo
+    (\``git clone https://github.com/compbiocore/ccv_bootcamp_annotations.git`\`)
+5.  Go back to `ood.ccv.brown.edu` and look under `Interactive Apps` in
+    the blue menu bar and click on `RStudio on Singularity` under
+    `Expert GUIs`.
+
+Fill in the fields as follows:
+
+-   `Account`: leave blank\
+-   `Partition`: leave blank\
+-   `Number of hours`: 24\
+-   `Num Cores`: 4\
+-   `Memory`: 15\
+-   `Singularity Container Path`:/oscar/data/shared/databases/workshops/bootcamp_2024/ngs_counts/ngscounts.sif\
+-   `Package install Path`: leave blank\
+-   `Path for R Executable`: \~/scratch\
+-   `R Module`: leave blank\
+-   `Additional Data Path`: leave blank 
+-   `Reservation`: leave blank\
+
+Once your job starts, click the button to connect to session.\
+At the top of the screen you'll see a menu bar that starts with 'file',
+click on 'file' and 'open file' and open the notebooks/index.qmd file in
+the repo you cloned.\
+
+# Introduction to RNAseq: experimental analysis and design
+
+# Abstract
+
+This portion of the workshop introduces RNA-seq analysis using R,
+including the (Ranged)SummarizedExperiment data class, exploratory data
+analysis and visualizations, data transformations, and experimental
+design consideratons. It uses quotes and materials from [RNA-seq
+workflow: gene-level exploratory analysis and differential
+expression](https://www.bioconductor.org/help/workflows/rnaseqGene/) by
+Love, Anders, Kim, and Huber and the [Harvard Chan Bioinformatics Core
+(HBC)](https://hbctraining.github.io/DGE_workshop/lessons/04_DGE_DESeq2_analysis.html).
+The notebook is forked and modified from [two notebooks originally
+created by Levi
+Waldron](https://github.com/compbiocore/bioconductor-workshop-2). If you
+need additional help with RNA-seq analysis, experimental design, or
+setting up your design matrix, the Computational Biology Core hosts
+weekly office hours. Please see the [CCV Calendar for an up-to-date
+schedule](https://events.brown.edu/ccv/week).
+
+# Outline
+
+1.  Introduction to RNA-seq Data
+    -   What is RNAseq?
+        -   Some more resources about sequencing technologies
+    -   Computational workflow overview
+2.  Standard data types
+    -   Counts matrices
+    -   SummarizedExperiment
+        -   Creating a SummarizedExperiment object from scratch
+3.  Exploring the Airway dataset
+    -   Creating a DESeqDataSet
+    -   Filtering genes not satisfying a minimum expression threshold
+    -   Data transformation
+    -   Exploring data at the sample level
+        -   Boxplots
+        -   Correlation plots
+        -   Density plots
+        -   Sample distances
+        -   PCA
+        -   MDS
+4.  Differential Expression Analysis
+    -   Running DESeq2
+        -   Normalization
+        -   Dispersion Estimation
+        -   Hypothesis Testing
+    -   Building the Results Table
+        -   Statistical Terminology
+        -   Multiple testing
+        -   Other comparisons
+5.  Diagnostic Plots
+    -   MA Plot
+    -   Volcano Plot
+6.  Model Building and Analytic Approaches
+    -   Model formulae and terminology
+    -   The Design Matrix\
+    -   Contrasts
+7.  Experimental Design
+    -   Single factor design
+    -   Multi-factor design: two factors
+    -   Blocking
+    -   Interactions
+    -   Repeat Measures/Time Series
+    -   Likelihood ratio test
+    -   Other R packages for differential expression analysis
+
+# Introduction to RNAseq
+
+## What is RNAseq?
+
+The central dogma of biology refers to the concept that in general,
+biological information flows from DNA to RNA to proteins, which are the
+molecules that encode for various enzymes etc., that help a living
+organism maintain homeostasis and self-regulate. For this workshop, we
+are going to talk about analyzing transcriptome data, where genes are
+regulated at the level of DNA being transcribed into RNA.
+
+The general experimental process involves extracting RNA from your
+different experimental conditions, performing the library preparation
+steps (e.g., cDNA synthesis, fragmentation, and adding adapters). These
+libraries are sequenced on an Illumina FlowCell. The output from this
+process is these raw reads (.fastq or .fq files), which you can then
+align to the appropriate reference genome or transcriptome, where more
+reads will align to more highly expressed genes. This data can be
+processed to get back a counts matrix which will let you look at
+differential expression and perform other downstream analyses.
+
+![](image/rnaseq.png)
+
+### Some more resources about sequencing technologies:
+
+-   https://www.illumina.com/content/dam/illumina-marketing/documents/products/illumina_sequencing_introduction.pdf\
+-   Rory Stark, Marta Grezlak, and James Hadfield. NA sequencing: the
+    teenage years Nature Reviews Genetics *Nature Reviews Genetics*
+    **20,** 631-656 (2019)
+
+## Computational workflow overview
+
+The computational analysis of an RNA-seq experiment begins from the raw
+FASTQ files that contain the nucleotide sequence of each read and a
+quality score at each position. These reads are **aligned** to a
+reference genome and the alignment files (.SAM or .BAM file) are turned
+into a counts matrix by programs such as HTSeq or featureCounts. Some
+newer and very fast alignment-free approaches can also estimate counts
+per transcript **without alignment**. Instead of directly aligning
+RNA-seq reads to a reference genome, they perform "pseudo-alignment" by
+assigning reads to transcripts that contain compatible k-mers and
+generate a table of read counts without the need for a counting step.
+
+![](image/RNAseqWorkflow.png){width="50%"}
+
+There are many different programs for running alignment-based
+quantification. Each alignment program will make different assumptions
+about the data and will show some variation in performance. For example,
+not all aligners are 'splice-aware', which means that they will
+recognize intron-sized gaps that are spliced from transcripts. Some
+popular alignment-based tools include
+[STAR](https://github.com/alexdobin/STAR),
+[HISAT2](https://daehwankimlab.github.io/hisat2/),
+[GSNAP/GMAP](http://research-pub.gene.com/gmap/), among many others.
+Counts can be generated from SAM/BAM alignments using programs such as
+[featureCounts](http://bioinf.wehi.edu.au/featureCounts/) or
+[HTSeq](https://htseq.readthedocs.io/en/master/).
+
+::: {.alert .alert-block .alert-info}
+<b>Note:</b> The information you get back from approaches where you are
+aligning to a transcriptome (like Salmon and Kallisto) will be dependent
+on the quality of the annotations, which are not always great
+(especially for non-model organisms).
+:::
+
+Alignment-free tools have gained popularity for their fast performance
+and low memory requirements while maintaining good accuracy. The most
+popular of these tools are [Salmon](https://combine-lab.github.io) and
+[Kallisto](https://pachterlab.github.io/kallisto/).
+
+The differential expression analyses introduced here assume you are
+analyzing a raw counts table, where the rows are the genes or
+transcripts and the columns are your samples. It is always a good idea
+to read the documentation for any of these programs to make sure you
+understand what file formats should be used. The two most popular
+programs for differential expression analyses are probably
+[DESeq2](http://bioconductor.org/packages/DESeq2) and
+[edgeR](http://bioconductor.org/packages/). Each program makes different
+assumptions and has different approaches to normalizing the data, and
+they will likely give you slightly different numbers of differentially
+expressed genes if you run both programs.
+
+The counts matrices can also be transformed so that they are compatible
+with common statistical methods for exploratory analysis of
+multidimensional data, for example clustering and principal components
+analysis (PCA), which work best for data that have the same variance at
+different mean values, i.e. the mean and variance are independent.
+
+::: {.alert .alert-block .alert-info}
+<b>Note:</b> The rest of this workshop assumes you are starting with the
+output of some sequence analysis pipeline (i.e. counts).
+:::
+
+# Standard data types
+
+## Counts matrices
+
+The counts matrix is a simple, standard way to represent RNAseq
+experiments. The rows correspond to genes, the columns correspond to
+each sample, and the data are the counts.
+
+<img src="Images/counts_matrix.png" width="300"/>
+
+## SummarizedExperiment
+
+The SummarizedExperiment is a data class for representing RNA-seq data.
+It builds on a simple counts matrix to include information about
+samples. It can also optionally include information about exons and
+genes, the experimental design, and additional metadata. It is becoming
+a very popular and standard way to represent sequencing data and
+metadata in R. **The component parts of a *SummarizedExperiment* object
+`se` are:**
+
+-   `assay(se)` or `assays(se)$counts` contains the matrix of counts
+-   `colData(se)` may contain data about the columns, e.g. patients or
+    biological units
+-   `rowData(se)` may contain data about the rows, e.g. genes or
+    transcript
+-   `rowRanges(se)` may contain genomic ranges for the genes/transcripts
+-   `metadata(se)` may contain information about the experiment
+
+![](image/summarizedexperiment.png)
+
+Load the `airway`, `SummarizedExperiment`, and other packages we will
+need.
+
+```{r}
+.libPaths(c("/usr/local/lib/R/site-library", "/usr/local/lib/R/library", "/users/jwalla12/R/x86_64-pc-linux-gnu-library/4.3" ))
+suppressPackageStartupMessages(library('airway'))
+suppressPackageStartupMessages(library('SummarizedExperiment'))
+suppressPackageStartupMessages(library('DESeq2'))
+suppressPackageStartupMessages(library('tidyr'))
+suppressPackageStartupMessages(library('ggplot2'))
+suppressPackageStartupMessages(library('patchwork'))
+suppressPackageStartupMessages(library('vsn'))
+suppressPackageStartupMessages(library('GGally'))
+suppressPackageStartupMessages(library('pheatmap'))
+suppressPackageStartupMessages(library('RColorBrewer'))
+suppressPackageStartupMessages(library('PoiClaClu'))
+suppressPackageStartupMessages(library('tibble'))
+```
+
+For the purposes of this tutorial, we will be using the `airway` data.
+This data is in the `airway` package, stored as a
+`RangedSummarizedExperiment` object -- a type of `SummarizedExperiment`.
+Four human airway smooth muscle cell lines were left untreated or
+treatreated with dexamethasone for 18 hours (Himes et al. 2014).
+
+```{r}
+data(airway)
+airway
+```
+
+Use the `assays` function to see the names of the assays stored in the
+object.
+
+```{r}
+assays(airway)
+```
+
+We can use the `$` accessor to view the `counts` assay. We will combine
+that with `head` and `assay` functions to access the first view rows of
+the counts matrix. The rows are genes, the columns are the samples, and
+the data are the counts:
+
+```{r}
+head(assays(airway)$counts)
+```
+
+Use the `colData` function to see more information about each sample:
+
+```{r}
+head(colData(airway))
+```
+
+### Creating a SummarizedExperiment object from scratch
+
+You can create `SummarizedExperiment` objects using the
+`SummarizedExperiment` function. The `assay` and `colData` arguments are
+required.
+
+```{r}
+airway_counts <- assay(airway)
+airway_samples <- colData(airway)
+new_se <- SummarizedExperiment(assays = airway_counts, 
+                               colData = airway_samples)
+new_se
+```
+
+Use `?` to get more information about the function:
+
+```{r}
+?SummarizedExperiment
+```
+
+::: {.alert .alert-block .alert-success}
+<b>Exercise 1:</b> Based on what we have just discussed, how would you
+create a new SummarizedExperiment object that contains information about
+the genes in the airway data (e.g., the rows) and their location in the
+genome? What about additional metadata?
+:::
+
+# Exploring the airway dataset
+
+Exploratory data analysis of RNAseq data is an important step for
+assessing data quality. You can look at the expression of genes of
+interest or relationships/similarities among sample groupings. Filtering
+and exploring your data is an iterative process; as you explore and
+visualize your data you can tweak your filtering parameters to see how
+the filtering impacts the results.
+
+## Creating a `DESeqDataSet`
+
+Once we have our fully annotated *SummarizedExperiment* object, we can
+construct a *DESeqDataSet* object from it that will then form the
+starting point of the exploratory analysis. Here, `~ cell + dex` means
+that we are concerned with two covariates, the cell line (`cell`) and
+whether or not the samples were treated with dexamethasone (`dex`).
+
+```{r}
+dds <- DESeqDataSet(airway, design = ~ cell + dex)
+```
+
+You can use the `$` accessor to access the individual columns (like you
+would with a data frame). For example, we can look at the factor levels
+of our dex treatments:
+
+```{r}
+levels(colData(dds)$dex)
+```
+
+We can set `untrt` as the reference factor level using `relevel`
+
+```{r}
+colData(dds)$dex <- relevel(colData(dds)$dex, ref = "untrt")
+```
+
+```{r}
+levels(colData(dds)$dex)
+```
+
+We can also set all the factor levels more explicitly using `factor`
+
+```{r}
+colData(dds)$dex  <- factor(colData(dds)$dex, levels = c("untrt","trt"))
+```
+
+```{r}
+levels(colData(dds)$dex)
+```
+
+## Filtering genes not satisfying a minimum expression threshold
+
+Our count matrix might contain rows with only zeroes or genes that are
+very lowly expressed in every condition tested. These genes are not
+likely to be informative, so to reduce the size of the object we can
+remove these rows. Here, we remove rows of the *DESeqDataSet* that have
+no counts, or only a single count across **all** samples. First, we can
+use `nrow` to see how many genes are in the dataset before we filter:
+
+```{r}
+nrow(dds)
+```
+
+Let's re-assign `dds` to `dds.original` before we do any filtering.
+
+```{r}
+dds.original <- dds
+```
+
+Look at the first few lines using `head`
+
+```{r}
+head(counts(dds.original))
+```
+
+Let's filter the expression matrix so we are including genes that have
+at least one fragment mapped in at least 1 sample (or `rowSums` greater
+than 1).
+
+```{r}
+dds <- dds[ rowSums(counts(dds)) > 1, ]
+```
+
+Let's look at the first few rows:
+
+```{r}
+head(counts(dds))
+```
+
+Notice that the gene that had zero counts in every sample
+(`ENSG00000000005`) is gone, but `ENSG00000000938` remains because it
+has a rowSum greater than 1. How many genes do we have left after
+filtering?
+
+```{r}
+nrow(dds)
+```
+
+Only 46% of the genes remain after performing this filtering step. A
+more stringent method of filtering, such as removing all genes that have
+any 0 count entries at all, would yield an even smaller percentage of
+genes. Let's look at the count densities from before and after
+filtering:
+
+First, we can use the `pivot_longer` function to turn our data into a
+longer format .
+
+```{r}
+counts_melted_original <-  as.data.frame(counts(dds.original)) %>% 
+pivot_longer(
+    cols = starts_with("SRR"),
+    values_to = "counts",
+    names_to = "library",
+    values_drop_na = TRUE)
+
+counts_melted_filtered <- as.data.frame(counts(dds)) %>% 
+pivot_longer(
+    cols = starts_with("SRR"),
+    values_to = "counts",
+    names_to = "library",
+    values_drop_na = TRUE)
+```
+
+Then we can compare the density plots:
+
+```{r}
+p1 <- ggplot(counts_melted_original, aes(x = counts)) + 
+geom_density(aes(group = library, color = library), adjust = 5) + 
+xlim(0, 200) + 
+ylim(0, .6) +
+ggtitle('original')
+
+
+p2 <- ggplot(counts_melted_filtered, aes(x = counts)) + 
+geom_density(aes(group = library, color = library), adjust = 5) + 
+xlim(0, 200) + 
+ylim(0, .6) + 
+ggtitle('filtered')
+
+
+options(repr.plot.height=5, repr.plot.width=10)
+p1 | p2
+```
+
+The warning message just means that there are some data points that are
+not displayed because they are not within the axis ranges we have
+defined. We can see that our filtering has shifted our density plots --
+before filtering nearly all of the area under the curve was near 0.
+These genes do not contribute meaningful information to our analysis
+(and can even bias some of our analytical techniques) so we remove them.
+
+**Note**: For differential expression analysis later, filtering is
+allowable but not necessary if using [Independent Hypothesis
+Weighting](http://www.bioconductor.org/packages/IHW), as is the default
+behavior of `DESeq2`. Independent hypothesis weighting (IHW) is a
+multiple testing procedure that increases power compared to the method
+of Benjamini and Hochberg by assigning data-driven weights to each
+hypothesis.
+
+::: {.alert .alert-block .alert-success}
+<b>Exercise 2:</b> How many genes pass a different filtering cutoff
+where at least 3 samples must have a count of 10 or higher? How does
+this filtering change the density plots?
+:::
+
+## Data Transformation
+
+Why transform the data? Many common statistical methods for
+*exploratory* analysis of multidimensional data, for example clustering
+and *principal components analysis* (PCA), **work best for data that
+generally has the same variance across different values of the mean**.
+When the expected amount of variance is approximately the same across
+different mean values, the data is said to be *homoskedastic*.
+
+For RNA-seq count data, however, the expected variance grows with the
+mean. The problem with this mean-variance relationship is that **if one
+performs PCA directly on a matrix of counts or normalized counts (e.g.
+correcting for differences in sequencing depth), the resulting plot
+typically depends mostly on the genes with the *highest* counts because
+they show the largest absolute differences between samples**. Simply
+put, the genes with the highest counts (i.e., those that are more highly
+expressed) will dominate the analysis simply due to them having more
+variability.
+
+A simple and often used strategy to address this problem is to take the
+logarithm of the normalized count values plus a pseudocount of 1 (this
+pseudocount of 1 accounts for 0-count observations, as the log of 0 is
+undefined and the log of 1 is always 0, irrespective of base); however,
+this approach can also introduce problems; depending on the choice of
+pseudocount, the genes with **the very *lowest* counts will now
+contribute a great deal of noise to the resulting plot, because taking
+the logarithm of small counts actually inflates their variance**.
+
+As a solution, DESeq2 offers two additional transformations for count
+data that stabilize the variance across the mean: the
+**regularized-logarithm transformation or rlog** (Love, Huber, Anders,
+Genome Biology 2014); and the **variance stabilizing transformation or
+VST** for negative binomial data with a dispersion-mean trend (Anders
+and Huber, Genome Biology 2010).
+
+Let's compare these different transformation methods. First, we will run
+the `rlog` and `vst` transformations.
+
+```{r}
+rld <- rlog(dds, blind = FALSE) #rlog
+vsd <- vst(dds, blind = FALSE) #vst
+```
+
+We will also run the standard `log2` transformation, where a pseudocount
+of 1 is added to each point before transforming. We need to first
+estimate *size factors* to account for sequencing depth, and then
+specify `normalized=TRUE`. Sequencing depth correction is done
+automatically for the `rlog` and the `vst`.
+
+```{r}
+ddsESF <- estimateSizeFactors(dds) #estimate size factors first
+logt <- data.frame(log2(counts(ddsESF, normalized=TRUE)[, 1:2] + 1)) #standard log2
+```
+
+Now we can look at some scatter plots to compare the raw counts to the
+three different transformation methods:
+
+```{r}
+p1 <- ggplot(data.frame(assay(dds)[, 1:2]), aes(x = SRR1039508, y = SRR1039509)) + 
+geom_point() + 
+geom_abline(intercept = 0, slope = 1, color = 'blue', linewidth = 2) +
+coord_fixed() +
+xlim(0,300000)+
+ylim(0,300000) +
+ggtitle('counts')
+
+p2 <- ggplot(logt, aes(x = SRR1039508, y = SRR1039509)) + 
+geom_point() + 
+geom_abline(intercept = 0, slope = 1, color = 'blue', linewidth = 2) +
+coord_fixed() +
+xlim(0,19)+
+ylim(0,19) +
+ggtitle('log2(x+1)')
+
+p3 <- ggplot(data.frame(assay(rld)[, 1:2]), aes(x = SRR1039508, y = SRR1039509)) + 
+geom_point() + 
+geom_abline(intercept = 0, slope = 1, color = 'blue', linewidth = 2) +
+coord_fixed() +
+ggtitle('rlog')
+
+p4 <- ggplot(data.frame(assay(vsd)[, 1:2]), aes(x = SRR1039508, y = SRR1039509)) + 
+geom_point() + 
+geom_abline(intercept = 0, slope = 1, color = 'blue', linewidth = 2) +
+coord_fixed() +
+xlim(0,19)+
+ylim(0,19) +
+ggtitle('vst')
+
+options(repr.plot.width=15, repr.plot.height=5)
+
+p1 | p2 | p3 | p4
+```
+
+Here are some scatter plots showing the raw counts and the log2 (left),
+rlog (middle), and VST (right) transformed counts. The x and y axes are
+expression values in two samples from the `airway` data. Each black dot
+is a gene and its position on the plot indicates its expression levels
+in two of the `airway` data samples. The blue line is indicating the 1:1
+line -- points closer to this line have similar expression values in
+sample x and in sample y. Genes in the bottom left corner are lowly
+expressed and genes in the upper right corner are highly expressed.
+
+We can see how genes with low counts (bottom left-hand corner) are
+highly variable on the ordinary logarithmic scale (`log2`), while the
+`rlog` transform and `vst` compress differences for the low count genes.
+Since these low-count values are likely artifacts introduced by
+sequencing error or random chance, their exclusion helps to prevent
+false positives.
+
+Plotting the standard deviation of each row (gene) against the mean is
+also helpful for understanding how data transformations impact the
+mean:variance relationship:
+
+```{r}
+p5 <- meanSdPlot(counts(dds), ranks = FALSE, plot = FALSE)
+p6 <- meanSdPlot(log2(counts(ddsESF, normalized=TRUE)[, 1:2] + 1), ranks = FALSE, plot = FALSE)
+p7 <- meanSdPlot(rlog(counts(dds), blind = FALSE), ranks = FALSE, plot = FALSE)
+p8 <- meanSdPlot(vst(counts(dds), blind = FALSE), ranks = FALSE, plot = FALSE)
+
+options(repr.plot.width=15, repr.plot.height=5)
+
+(p5$gg + ggtitle('counts')) / (p6$gg + ggtitle('log2(x+1)')) / (p7$gg + ggtitle('rlog')) / (p8$gg + ggtitle('vst')  + scale_x_continuous(limits = c(0, 19)) ) 
+```
+
+On each of these plots, the x-axis is the mean and the y-axis is the
+standard deviation. The color of each point indicates how many data
+points have a given mean and standard deviation. Ligher blue colors
+indicate a greater number of data points at a particular mean and
+standard deviation, while darker blue indicates fewer data points.
+
+If we look at the `counts` plot on the far left, we see outliers in the
+upper right of the plot, each colored dark blue to show that very few
+genes fall within each point - these observations would cause a great
+deal of bias in the results if uncorrected.
+
+Moving to the `log2` plot, we see that transforming our data using the
+logarithm with a small pseudocount transformation (i.e., the standard
+log2 transformation) amplifies the standard deviation when the values
+are close to 0. As a result, the low count genes with low
+signal-to-noise ratio will now overly contribute to sample-sample
+distances and PCA plots.
+
+For genes with high counts, the rlog and VST transformations will give
+results similar to that of the ordinary log2 transformation of
+normalized counts. **For genes with lower counts, the values are
+shrunken towards the genes' averages across all samples**. The
+rlog-transformed or VST data then becomes approximately homoskedastic,
+and can be used directly for computing distances between samples, making
+PCA plots, or as input to downstream methods which perform best with
+homoskedastic data.
+
+**Which transformation to choose?** The **rlog tends to work well on
+small datasets (n \< 30)**, sometimes outperforming the VST when there
+is a large range of sequencing depth across samples (an order of
+magnitude difference). However, the VST is much faster to compute and is
+less sensitive to high count outliers than the rlog. Therefore, **we
+recommend the VST for large datasets (hundreds of samples)**. You can
+perform both transformations and compare the `meanSdPlot` or PCA plots
+generated.
+
+::: {.alert .alert-block .alert-warning}
+<b>Note:</b> Using transformed or normalized counts is only for
+visualizing and exploring data -- statistical analysis packages like
+DESeq2 and edgeR should be used with raw counts matrices
+:::
+
+In the above function calls, we specified `blind = FALSE`, which means
+that differences between cell lines and treatment (the variables in the
+design) will not contribute to the expected variance-mean trend of the
+experiment. The experimental design is not used directly in the
+transformation, only in estimating the global amount of variability in
+the counts. For a fully *unsupervised* transformation, one can set
+`blind = TRUE` (which is the default).
+
+## Exploring data at the sample level
+
+A useful step in an RNA-seq analysis is often to assess overall
+similarity between samples: Which samples are similar to each other,
+which are different? Does this fit to the expectation from the
+experiment's design?
+
+Before we get started, tidy the counts and transformed counts matrices
+so they are easier to visualize:
+
+```{r}
+log2_tidy <-
+  as.data.frame(log2(assay(ddsESF) + 1)) %>% 
+  rownames_to_column('gene_id') %>% 
+  pivot_longer(cols = starts_with('SRR'),
+               names_to = 'library',
+               values_to = 'counts')
+
+rld_tidy <- 
+  as.data.frame((assay(rld))) %>%
+  rownames_to_column('gene_id') %>% 
+  pivot_longer(cols = starts_with('SRR'),
+               names_to = 'library',
+               values_to = 'counts')
+
+vsd_tidy <- 
+  as.data.frame((assay(vsd))) %>%
+  rownames_to_column('gene_id') %>% 
+  pivot_longer(cols = starts_with('SRR'),
+               names_to = 'library',
+               values_to = 'counts')
+```
+
+### Boxplots
+
+Boxplots of the count distributions in each sample are a good way to
+understand the effects these transformations have at the level of
+individual subjects.
+
+```{r}
+bp1 <- ggplot(log2_tidy, aes(x = library, y = counts)) + 
+geom_boxplot() +
+ggtitle('log2(x+1)') +
+theme(axis.text.x = element_text(angle = 45, hjust = 1))
+
+bp2 <- ggplot(rld_tidy, aes(x = library, y = counts)) + 
+geom_boxplot() +
+ggtitle('rlog')+
+theme(axis.text.x = element_text(angle = 45, hjust = 1))
+
+bp3 <- ggplot(vsd_tidy, aes(x = library, y = counts)) + 
+geom_boxplot() +
+ggtitle('vsd')+
+theme(axis.text.x = element_text(angle = 45, hjust = 1))
+
+options(repr.plot.width=15, repr.plot.height=5)
+
+bp1 | bp2 | bp3
+```
+
+In R's boxplots, points classified as outliers are shown on the plots as
+circles. Neither the standard log2 or the rlog transformations include
+any outliers, while the vst transformations do have outliers at the
+upper end of the distributions. These points are classified as outliers
+because the vst method compresses lower end points more substantially
+(which can be seen on the scatter plots above). The actual magnitude of
+these points does not significantly exceed the magnitude seen with the
+other transformations.
+
+### Density plots
+
+Density plots are another good way to visualize if the counts
+distributions agree (or disagree) across the samples.
+
+```{r}
+dp1 <- ggplot(log2_tidy, aes(x = counts, color = library)) + 
+geom_density() +
+ggtitle('log2(x+1)') +
+ylim(0,.8)
+
+dp2 <- ggplot(rld_tidy, aes(x = counts, color = library)) + 
+geom_density() +
+ggtitle('rlog') +
+ylim(0,.8)
+
+dp3 <- ggplot(vsd_tidy, aes(x = counts, color = library)) + 
+geom_density() +
+ggtitle('vst') +
+ylim(0,.8)
+
+dp1 / dp2 / dp3
+```
+
+Note the different axis scales again -- the vst transformation axes do
+not start at 0 because this method shifts all the low counts data toward
+their mean across samples. We can also see the previously discussed
+issues with how the log2 transformation handles low counts data. You
+might also notice that some of the rlog counts are below 0 -- again,
+this is expected as rlog borrows information across samples and
+implements a log transformation (which will result in negative values
+for counts below 1).
+
+### Sample distances
+
+We can also use the R function dist to calculate the "Euclidean
+distance" between samples; the Euclidean distance is simply the
+higher-dimensional analogue of the human-measurable distance between
+points in 2 or 3 dimensions.
+
+To ensure we have a roughly equal contribution from all genes, we
+calculate it from the rlog-transformed data. We need to transpose the
+matrix of values using t, because the dist function expects the
+different samples to be rows of its argument, and different dimensions
+(here, genes) to be columns.
+
+```{r}
+sampleDists <- dist(t(assay(rld)))
+sampleDists
+```
+
+Then we can make a heatmap to visualize the correlations.
+
+In order to plot the sample distance matrix with the rows/columns
+arranged by the distances in our distance matrix, we manually provide
+sampleDists to the clustering_distance argument of the pheatmap
+function. Otherwise the pheatmap function would assume that the matrix
+contains the data values themselves, and would calculate distances
+between the rows/columns of the distance matrix, which is not desired.
+We also manually specify a blue color palette using the colorRampPalette
+function from the RColorBrewer package (this coloring step is optional).
+
+Make the sampleDists into a matrix
+
+```{r}
+sampleDistMatrix <- as.matrix(sampleDists)
+head(sampleDistMatrix)
+```
+
+Give the rows more meaningful names and clean up the column names since
+they will be redundant in the heatmap
+
+```{r}
+rownames(sampleDistMatrix) <- paste( rld$dex, rld$cell, sep = " - " )
+colnames(sampleDistMatrix) <- NULL
+head(sampleDistMatrix)
+```
+
+Let's set our color palette for the heatmap.
+
+```{r}
+colors <- colorRampPalette( rev(brewer.pal(9, "Blues")) )(255)
+```
+
+Now we make the heatmap, specifying that we have already calculated the
+clustering distances and stored them in `sampleDists`.
+
+```{r}
+options(repr.plot.height=3, repr.plot.width=5)
+pheatmap(sampleDistMatrix,
+         clustering_distance_rows = sampleDists,
+         clustering_distance_cols = sampleDists,
+         col = colors)
+```
+
+Another option for calculating sample distances is to use the Poisson
+Distance, implemented in the PoiClaClu CRAN package. This measure of
+dissimilarity between counts also takes the inherent variance structure
+of counts into consideration when calculating the distances between
+samples. The PoissonDistance function takes the original count matrix
+(not normalized) with samples as rows instead of columns, so we need to
+transpose the counts in dds.
+
+```{r}
+poisd <- PoissonDistance(t(counts(ddsESF)))
+```
+
+convert to a matrix and fix the row and column names
+
+```{r}
+samplePoisDistMatrix <- as.matrix( poisd$dd )
+rownames(samplePoisDistMatrix) <- paste( rld$dex, rld$cell, sep=" - " )
+colnames(samplePoisDistMatrix) <- NULL
+```
+
+Then create the heatmap using the same color palette previously defined
+
+```{r}
+options(repr.plot.height=3, repr.plot.width=5)
+pheatmap(samplePoisDistMatrix,
+         clustering_distance_rows = poisd$dd,
+         clustering_distance_cols = poisd$dd,
+         col = colors)
+```
+
+In both cases, the distance matrices are indicating that there are
+differences between cell types, but they generally cluster based on
+their treatment before cell type.
+
+We can also use the `ggpairs` function to look at trends across samples:
+
+```{r}
+options(repr.plot.width=10, repr.plot.height=10)
+```
+
+```{r}
+ggpairs(as.data.frame(log2(counts(ddsESF, normalized=TRUE) + 1)), title = 'log2(x+1)')
+```
+
+```{r}
+ggpairs(as.data.frame(rlog(counts(dds))), title = 'rlog')
+```
+
+```{r}
+ggpairs(as.data.frame(vst(counts(dds))), title = 'vst')
+```
+
+Starting in the lower left corner of the ggpairs plot, we see several
+scatter plots that compare each of the samples. The scatter plots are
+just like the 1:1 plots shown earlier in this workshop, where each point
+is a gene and points that are closer to the 1:1 line show similar
+expression levels in the two samples compared. Again, we can see that
+the log2 transformation has higher variance when the counts are closer
+to 0. The rlog transformation compresses the variation, while the vst
+transformation shifts counts away from 0 (note the axes that start at
+4).
+
+Distribution plots are shown on the diagonal -- we can see how each of
+these transformations influences the distribution of the counts -- note
+the axis ranges on the vst plots, which do not start at 0. The
+scatterplots are prone to over-plotting so it can be difficult to tell
+how many points are in each section of the plot -- the density plots
+help convey that information.
+
+The upper right corner shows the Pearson correlations -- a concise way
+to make sure your samples are behaving the ways you anticipate (for
+example, that your replicates agree).
+
+## PCA
+
+Another way to visualize sample-to-sample distances is a principal
+components analysis (PCA). In this ordination method, the data points
+(here, the samples) are projected onto the 2D plane such that they
+spread out in the two directions that explain most of the differences
+(figure below). The x-axis is the direction (i.e., principal component)
+that separates the data points the most. The values of the samples in
+this direction are written *PC1* ("principal component 1"). The y-axis
+is a direction (another principal component, which must be
+*orthogonal* - perpendicular - to the first direction) that separates
+the data the second most. The values of the samples in this direction
+are written *PC2*. The percent of the total variance that is contained
+in the direction is printed in the axis label. Note that these
+percentages do not add to 100%, because there are more dimensions -
+often many of them - that contain the remaining variance (although each
+of these remaining dimensions will by definition explain less than the
+two that we see).
+
+```{r}
+colData(rld)
+options(repr.plot.width=7, repr.plot.height=7)
+plotPCA(rld, intgroup = c("dex", "cell"))
+```
+
+Here, we have used the function `plotPCA()` that comes with *DESeq2* to
+plot the rlog transformed data. The two terms specified by `intgroup`
+are the interesting groups for labeling the samples; they tell the
+function to use them to choose colors. Each unique combination of
+treatment and cell line is given its own color.
+
+::: {.alert .alert-block .alert-success}
+<b>Exercise 3:</b> If you look at `?plotPCA`, you'll see that the
+default behavior of `plotPCA` is to plot the top 500 genes. Does the PCA
+change if you change those settings and set `ntop = 50`?
+:::
+
+We can also build the PCA plot from scratch using the
+[ggplot2](https://cran.r-project.org/web/packages/ggplot2/index.html)
+package. This is done by asking the `plotPCA()` function to return the
+data used for plotting rather than building the plot. See the *ggplot2*
+[documentation](http://docs.ggplot2.org/current/) for more details on
+using `ggplot()`.
+
+Run `plotPCA` with `returnData = TRUE`
+
+```{r}
+pcaData <- plotPCA(rld, intgroup = c( "dex", "cell"), returnData = TRUE)
+pcaData
+```
+
+```{r}
+percentVar <- round(100 * attr(pcaData, "percentVar"))
+percentVar
+```
+
+We can then use this structure to build up a second plot in a figure
+below, specifying that the color of the points should reflect
+dexamethasone treatment and the shape should reflect the cell line.
+
+```{r}
+ggplot(pcaData, aes(x = PC1, y = PC2, color = dex, shape = cell)) +
+  geom_point(size =3) +
+  xlab(paste0("PC1: ", percentVar[1], "% variance")) +
+  ylab(paste0("PC2: ", percentVar[2], "% variance")) +
+  coord_fixed()
+```
+
+From the PCA plot, we see that the differences between cells (the
+different plotting shapes) are considerable, though not stronger than
+the differences due to treatment with dexamethasone (red vs blue color).
+This shows why it will be important to account for this in differential
+testing by using a paired design ("paired", because each dex treated
+sample is paired with one untreated sample from the *same* cell line).
+We are already set up for this design by assigning the formula
+`~ cell + dex` earlier when specifying our model.
+
+**A note on outlier detection:** there are no hard, fast rules for
+identifying outliers; however, PCA can provide you with useful
+information for making decisions about which samples may be outliers.
+One general approach is to visually inspect the PCA bi-plot produced by
+the `plotPCA` function (i.e., the plot visualizing the samples along the
+two principal components explaining the most variance). Samples that are
+outliers will be many of orders of magnitude away from the main group of
+samples along principal component 1; the difference should be easy to
+identify visually and usually will not require statistical
+justification. A second approach is to quantify outliers using z-score
+standardization. Specifically, you take the principal component 1 values
+from your PCA object and convert them to z-scores using the following
+standardization:
+
+$x_{gi}$ $\leftarrow$ $\frac{(x_{gi} - \bar{x}_g)}{s_g}$
+
+In our context, this just means we take each value on the first
+principal component, subtract it from the mean of all the values on the
+first principal component, and then divide this difference by the
+standard deviation of all the values on the first principal component.
+To do so, we would access the first principal component from our PCA
+object using `pcaData$PC1` and standardize these scores using
+`scale(pcaData$PC1)`. Once you have the standardized scores, outliers
+can be identified as z-scores greater than 3 or 6 in absolute value,
+depending on how conservative one wishes to be.
+
+**Note:** It is important to note that the two aforementioned approaches
+are just general guidelines and identification of outliers requires
+statistical knowledge as well as detailed knowledge of experimental
+details, lab techniques used, etc. It is advised that you consult with a
+statistician when making such decisions.
+
+## MDS
+
+Another plot, very similar to the PCA plot, can be made using the
+*multidimensional scaling* (MDS) function in base R. MDS is a useful
+technique for examining sample-to-sample distances that is **used when
+we don't have the original data, but instead have only a matrix of
+distances**. Here we compute the MDS for the distances calculated from
+the *rlog* transformed counts and plot these in a figure below.
+
+This method, unlike PCA, does not show the percent of variance explained
+by the individual components.
+
+**MDS plot using rlog-transformed values.**
+
+```{r}
+sampleDists <- dist(t(assay(rld)))
+sampleDistMatrix <- as.matrix( sampleDists )
+mds <- cbind(as.data.frame(colData(rld)), cmdscale(sampleDistMatrix))
+ggplot(mds, aes(x = `1`, y = `2`, color = dex, shape = cell)) +
+  geom_point(size = 3) + coord_fixed()
+```
+
+**MDS plot using the Poisson Distance.**
+
+```{r}
+library(PoiClaClu)
+poisd <- PoissonDistance(t(counts(ddsESF)))
+samplePoisDistMatrix <- as.matrix( poisd$dd )
+rownames(samplePoisDistMatrix) <- paste( rld$dex, rld$cell, sep=" - " )
+
+mdsPois <- cbind(as.data.frame(colData(ddsESF)),
+   cmdscale(samplePoisDistMatrix))
+ggplot(mdsPois, aes(x = `1`, y = `2`, color = dex, shape = cell)) +
+  geom_point(size = 3) + coord_fixed()
+
+```
+
+**A key difference between PCA and MDS is that PCA preserves the
+covariance of the data, while MDS preserves the distance between the
+data points. Depending on what type of distance you use for your MDS
+analysis, these two results can be the same (if Euclidean distance is
+used) or different. Here, we have used the Poisson distance (since it
+takes the structure of the variance into account), so the MDS and PCA
+results are not exactly the same.**
+
+# Differential expression analysis
+
+Now that we have completed a thorough examination of the data and are
+happy with the quality, we are ready to proceed with the differential
+expression analysis. \## Running the differential expression pipeline
+
+As a reminder the initial input for the analysis was the count matrix
+and experiment design (i.e., model formula) into the DESeqDataSet()
+function `dds <- DESeqDataSet(airway, design = ~ cell + dex)` and the
+factor levels must also be set
+`dds$dex <- relevel(dds$dex, ref = 'untrt')`. We can now run the
+differential expression pipeline on the raw counts with a single call to
+the function *DESeq*:
+
+```{r}
+dds <- DESeq(dds) # run differential expression analysis pipeline 
+```
+
+**Note:** This function will print out a message for the various steps
+it performs. These steps are:
+
+1.) the estimation of size factors (normalization);
+
+2.) the estimation of dispersion values for each gene;
+
+3.) and fitting a generalized linear model (GLM) with Wald tests.
+
+A *DESeqDataSet* is returned that contains all the fitted parameters
+within it, and the following section describes how to extract out
+results tables of interest from this object.
+
+The steps performed the DESeq() function are described in more detail
+below and in the manual page for *DESeq*, which can be accessed by
+typing `?DESeq`.
+
+### Normalization: A Note on Counts in DESeq2
+
+The starting point of the DESeq2 analysis is a count matrix. Given the
+count matrix, the first step in a differential expression analysis
+workflow is to perform count normalization so that we can make accurate
+comparisons of gene expression between samples. Normalization is the
+process of scaling raw count values to account for the factors we are
+not interested in. These are factors such as sequencing depth, gene
+length, and RNA composition. By accounting for such factors, we ensure
+that expression levels are more comparable between and/or within
+samples.
+
+It is important to note that DESeq2 automatically handles normalization
+internally when performing its analysis. It does so in an attempt to
+avoid the effects of count magnitude on differential expression status -
+otherwise, nonsignificant genes with very large counts would appear as
+false positives and significant genes with very small counts would
+appear as false negatives.
+
+Common methods of normalization include Trimmed Mean of M-Values (TMM),
+Relative Log Expression (RLE), and Median Ratio Normalization (MRN).
+TMM, used by the edgeR package, and RLE, yield very similar results.
+DESeq2 uses the RLE approach, which accounts for sequencing depth and
+RNA composition. Given that tools for differential expression analysis
+are comparing the counts between sample groups for the same gene, gene
+length is a factor that does not need to be accounted for with this
+design.
+
+**A word of caution.** When obtaining a result from the DESeq() function
+highlighting a list of genes, people will often look back at their
+original count table using a program like Excel and examine the counts
+tabulated therein. Doing so is inadvisable and misleading, as these
+non-normalized counts are not proper indicators of significance.
+
+Here, we will show how different normalized and non-normalized counts
+can be, illustrating the importance of normalization. Note that these
+plots are on the log scale, so a linear distance represents an
+exponential change. Very low counts are unaffected by normalization, as
+the normalization process adds a 0.5 pseudocount, but higher counts
+change substantially. Here, one of the two lower counts in the treatment
+group are almost halved and almost doubled in magnitude, respectively -
+an enormous change that would be misleading if viewed without factoring
+in the normalization.
+
+#### Counts plot
+
+A quick way to visualize the counts for a particular gene is to use the
+plotCounts function that takes as arguments the DESeqDataSet, a gene
+name, and the group over which to plot the counts (figure below).
+
+```{r}
+plotCounts(dds, gene = "ENSG00000132518", intgroup=c("dex"), main = "Normalized")
+plotCounts(dds, gene = "ENSG00000132518", intgroup=c("dex"), normalized = F, main = "Non-normalized")
+```
+
+### Dispersion Estimation
+
+The next step in differential expression analysis is the estimation of
+gene-wise dispersions. **What is dispersion and what does it
+represent?** Simply put, dispersion is a measure of spread or
+variability in the data. The measure of dispersion used with DESeq2 is
+related to both the mean and variance of the data. Specifically, The
+**DESeq2 dispersion estimates are inversely related to the mean and
+directly related to variance**. Based on this relationship, the
+dispersion is higher for small mean counts and lower for large mean
+counts. The dispersion estimates for genes with the same mean will
+differ only based on their variance. Therefore, the dispersion estimates
+reflect the variance in gene expression for a given mean value.
+
+The plot of mean versus variance in count data below shows the variance
+in gene expression increases with the mean expression (each black dot is
+a gene). Notice that the relationship between mean and variance is
+linear on the log scale, and for higher means, we could predict the
+variance relatively accurately given the mean. However, **for low mean
+counts, the variance estimates have a much larger spread; therefore, the
+dispersion estimates will differ much more between genes with small
+means**.
+
+![](image/DispersionEstimation1.png)
+
+**Why does dispersion matter for our modelling process?** To accurately
+model sequencing counts, we need to generate accurate estimates of
+within-group variation (variation between replicates of the same sample
+group) for each gene. With only a few (3-6) replicates per group, the
+estimates of variation for each gene are often unreliable (due to the
+large differences in dispersion for genes with similar means).
+
+To address this problem, DESeq2 shares information across genes to
+generate more accurate estimates of variation based on the mean
+expression level of the gene using a method called 'shrinkage'. DESeq2
+assumes that genes with similar expression levels have similar
+dispersion.
+
+**Estimating the dispersion for each gene separately:** To model the
+dispersion based on expression level (mean counts of replicates), the
+dispersion for each gene is estimated using maximum likelihood
+estimation. Maximum likelihood is an approach for estimating a
+parameter(s) by maximizing what's known as a likelihood function. The
+likelihood function is simply a function representing the support the
+data provides for each value of the parameter (e.g., dispersion). Thus,
+given the count values of the replicates, the most likely estimate of
+dispersion is calculated.
+
+**Fit curve to gene-wise dispersion estimates:** The next step in the
+workflow is to fit a curve to the dispersion estimates for each gene.
+The idea behind fitting a curve to the data is that different genes will
+have different scales of biological variability, but, over all genes,
+there will be a distribution of reasonable estimates of dispersion.
+
+This curve is displayed as a red line in the figure below, which plots
+the estimate for the expected dispersion value for genes of a given
+expression strength. Each black dot is a gene with an associated mean
+expression level and maximum likelihood estimation (MLE) of the
+dispersion (Step 1).
+
+![](image/DispersionEstimation2.png)
+
+**Shrink gene-wise dispersion estimates toward the values predicted by
+the curve** The next step in the workflow is to shrink the gene-wise
+dispersion estimates toward the expected dispersion values.
+
+The curve allows for more accurate identification of differentially
+expressed genes when sample sizes are small, and the strength of the
+shrinkage for each gene depends on :
+
+how close gene dispersions are from the curve
+
+sample size (more samples = less shrinkage)
+
+This shrinkage method is particularly important to reduce false
+positives in the differential expression analysis. Genes with low
+dispersion estimates are shrunken towards the curve, and the more
+accurate, higher shrunken values are output for fitting of the model and
+differential expression testing.
+
+Dispersion estimates that are slightly above the curve are also shrunk
+toward the curve for better dispersion estimation; however, genes with
+extremely high dispersion values are not. This is due to the likelihood
+that the gene does not follow the modeling assumptions and has higher
+variability than others for biological or technical reasons. Shrinking
+the values toward the curve could result in false positives, so these
+values are not shrunken. These genes are shown surrounded by blue
+circles below.
+
+![](image/DispersionEstimation3.png)
+
+This is a good plot to examine to ensure your data is a good fit for the
+DESeq2 model. You expect your data to generally scatter around the
+curve, with the dispersion decreasing with increasing mean expression
+levels. If you see a cloud or different shapes, then you might want to
+explore your data more to see if you have contamination (mitochondrial,
+etc.) or outlier samples. Note how much shrinkage you get across the
+whole range of means in the plotDispEsts() plot for any experiment with
+low degrees of freedom.
+
+Examples of worrisome dispersion plots are shown below:
+
+![](image/DispersionEstimation4.png)
+
+![](image/DispersionEstimation5.png)
+
+### Hypothesis Testing: Wald test
+
+The count data we work with for differential expression is assumed to
+follow a negative binomial distribution (Poisson-like), and thus the
+DESeq2 authors model the data as such. Specifically, after estimating
+dispersion, DESeq2 fits a negative binomial regression model to each
+gene to make inferences about differential expression. To make these
+inferences, we perform hypothesis testing on the regression coefficients
+in the negative binomial regression model using the Wald test.
+
+**Hypothesis testing**
+
+The first step in hypothesis testing is to set up a null hypothesis for
+each gene. In our case, the null hypothesis is that there is no
+differential expression across sample groups (i.e., regression
+coefficient == 0). Notice that we can do this without observing any
+data, because it is based on a thought experiment. Subsequently, we use
+a statistical test to determine if, based on the observed data, we
+should accept the null hypothesis as being true.
+
+**Wald test**
+
+With DESeq2, the Wald test is the default used for hypothesis testing
+when comparing two groups. The Wald test is a test of hypothesis usually
+performed on parameters that have been estimated via maximum likelihood.
+Maximum likelihood is just an estimation method for deriving the
+parameters to a statistical model. In our case, we are testing each gene
+model coefficient (i.e., regression coefficient) to see if it is
+significantly different from zero.
+
+**DESeq2 implements the Wald test by:**
+
+1.) Regression coefficients of the model are estimated for each sample
+group along with their standard error. Note that in DE the coefficents
+are the estimates for the log2 foldchanges for each sample group.
+
+2.) Take the regression coefficient and divide it by its standard error,
+which results in a z-statistic
+
+3.) The z-statistic is then compared to a standard normal distribution,
+and from this a p-value is derived. which reports the probability of
+observing a z-statistic at least as extreme as the one we observed,
+given that the null hypothesis is true
+
+4.) If the p-value is small, we reject the null hypothesis and state
+that there is evidence against the null (i.e. the gene is differentially
+expressed)
+
+::: {.alert .alert-block .alert-warning}
+<b>Note:</b> The Wald test and the previously discussed Likelihood Ratio
+Test (LRT) are essentially the same thing and test the same hypothesis.
+The big difference is their finite sample performance. Specifically, in
+smaller to moderate sample sizes, the LRT is to be preferred, as the
+Wald test becomes less reliable.
+:::
+
+## Building the results table
+
+Calling `results` without any arguments will extract the estimated log2
+fold changes and p-values **for the last variable in the design**
+formula\*\*. If there are more than 2 levels for this variable,
+`results` will extract the results table for a comparison of the last
+level over the first level.
+
+Here, our model was `~ cell + dex`, so the default comparison printed at
+the top of the output is `dex trt vs dex untrt`. As the `airway`
+dataset's `dex` variable only has two levels, there is no need to worry
+about explicitly specifying level comparisons in this case.
+
+Build a results table
+
+```{r}
+res <- results(dds)
+res
+```
+
+## A Note on Statistical Terminology
+
+-   For large samples, violations of distributional assumptions have
+    diminishing importance
+-   A sampling distribution is a probability distribution of a statistic
+    (e.g., the mean) obtained from repeated random sampling
+-   *Standard Error* is the standard deviation of a normally distributed
+    sampling distribution
+-   The null hypothesis is an assumption about the form of a sampling
+    distribution
+
+We have thus far defined the p-value with respect to the null
+hypothesis, but have yet to state what the null hypothesis actually
+means. Generally, in a biological experiment, the null hypothesis is
+that there is no difference between two (or more) different groups
+according so some metric being studied e.g. gene expression. The
+alternative hypothesis is that there is some difference. To determine
+which of these hypotheses is more likely to be correct, we calculate a
+p-value.
+
+**p-value:** the probability of getting a result at least as extreme as
+the one observed *given* that the null hypothesis is true.
+
+Thus, a low p-value means it's unlikely that you'd see what you're
+seeing if the null hypothesis is true, providing evidence that the null
+hypothesis is not true - in classical statistics, if that probability is
+lower than .05 (5%), we *reject the null hypothesis*. Note that this is
+not strictly identical to as *accepting the alternative hypothesis*, but
+with the null rejected, we only have the alternative hypothesis left
+(under this framework).
+
+## A Note On Multiple testing
+
+In high-throughput biology, we are careful to not use the p-values
+directly as evidence against the null, but instead to correct for
+*multiple testing*. The reason we do this is because we are running
+multiple (sometimes thousands of) hypothesis tests when performing
+differential expression analysis, and this increases the chances of
+observing false positives (Type I error). To deal with this, *DESeq2*
+uses the [Benjamini-Hochberg (BH)](https://www.jstor.org/stable)
+adjustment as implemented in the base R `p.adjust` function; in brief,
+this method calculates, for each gene, an adjusted p-value that answers
+the following question: if one called significant all genes with an
+adjusted p-value less than or equal to this gene's adjusted p-value
+threshold, what would be the fraction of false positives (the *false
+discovery rate*, FDR) among them, in the sense of the calculation
+outlined above? These values, called the BH-adjusted p-values, are given
+in the column `padj` of the `res` object.
+
+The BH correction is appropriate in the sense that it is not as
+overlyconservative as other correction approaches and maintains the
+desired coverage rate; however, it is important to note that this
+aproach isn't robust to violations of indepednence. This can be
+problematic in our context because the multiple hypothesis tests
+performed in differential expression analysis may very well be
+dependent. To deal with this, we can use a Bonferroni correction
+appraoch, which simply involves dividing the conventional p-value
+(usually 0.05) by the number of hypothesis tests being performed. This
+then creates a new nominal p-value against which the observed p-values
+are compared for signficiance. This can be done in DESeq2 by using the
+`p.adjust="Bonferroni"` argument. This approach is more robust to
+violations of independence than the BH correction; however, it is also
+important to note that this approach is known to be overlyconservative
+and thus it is harder to achieve signficance with.
+
+## Other comparisons
+
+The results for a comparison of any two levels of a variable can be
+extracted using the `contrast` argument to *results*. The user should
+specify three values: - the name of the variable\
+- the name of the level for the numerator\
+- and the name of the level for the denominator
+
+Here we extract results for the log2 of thefold change of one cell line
+over another. We will explicitly specify which cell lines to compare
+since there are more than two levels:
+
+```{r}
+results(dds, contrast = c("cell", "N061011", "N61311"))
+```
+
+There are additional ways to build results tables for certain
+comparisons after running *DESeq* once. If results for an interaction
+term are desired, the `name` argument of `results` should be used.
+Please see the help page for the `results` function for details on the
+additional ways to build results tables. In particular, the **Examples**
+section of the help page for `results` gives some pertinent examples.
+
+We subset the results table to these genes and then sort it by the log2
+fold change estimate to get the significant genes with the strongest
+downregulation:
+
+```{r}
+resSig <- subset(res, padj <= 0.05)
+head(resSig[ order(resSig$log2FoldChange), ])
+```
+
+...and with the strongest upregulation:
+
+```{r}
+head(resSig[ order(resSig$log2FoldChange, decreasing = TRUE), ])
+```
+
+# Diagnostic plots
+
+## MA-plot
+
+An *MA-plot* ([Dudoit et al., Statistica Sinica,
+2002](http://wwwf.imperial.ac.uk/~das01/BioinformaticsMSc/Papers/sinica.final.pdf))
+provides a useful overview for the distribution of the estimated
+coefficients in the model, i.e. the comparisons of interest, across all
+genes. On the y-axis, the "M" stands for "minus" -- subtraction of log
+values is equivalent to the log of the ratio -- and on the x-axis, the
+"A" stands for "average". You may hear this plot also referred to as a
+"mean-difference plot", or a "Bland-Altman plot".
+
+Before making the MA-plot, we use the `lfcShrink` function to shrink the
+log2 fold-changes for the comparison of dex treated vs untreated
+samples:
+
+```{r}
+res <- results(dds)
+res <- DESeq2::lfcShrink(dds, coef = "dex_trt_vs_untrt", res = results(dds))
+DESeq2::plotMA(res, ylim=c(-5,5))
+```
+
+**An MA-plot of changes induced by treatment.** The log2 fold-change for
+a particular comparison is plotted on the y-axis and the average of the
+counts normalized by size factor is shown on the x-axis. Each gene is
+represented with a dot. Genes with an adjusted *p* value below a
+threshold (here 0.1, the default) are shown in blue.
+
+The *DESeq2* package uses a Bayesian procedure to moderate (or "shrink")
+log2 fold changes from genes with very low counts and highly variable
+counts, as can be seen by the narrowing of the vertical spread of points
+on the left side of the MA-plot. As shown above, the `lfcShrink`
+function performs this operation. For a detailed explanation of the
+rationale of moderated fold changes, please see the *DESeq2* paper
+([Love and Huber, Genome Biology,
+2014](http://wwwf.imperial.ac.uk/~das01/BioinformaticsMSc/Papers/sinica.final.pdf)).
+
+If we had not used statistical moderation to shrink the noisy log2 fold
+changes, we would have instead seen the following plot:
+
+```{r}
+res.noshr <- results(dds)
+plotMA(res.noshr, ylim = c(-5, 5))
+```
+
+We can label individual points on the MA-plot as well. Here we use the
+`with` R function to plot a circle and text for a selected row of the
+results object. Within the `with` function, only the `baseMean` and
+`log2FoldChange` values for the selected rows of `res` are used.
+
+```{r}
+plotMA(res, ylim = c(-5,5))
+topGene <- rownames(res)[which.min(res$padj)]
+with(res[topGene, ], {
+  points(baseMean, log2FoldChange, col="dodgerblue", cex=2, lwd=2)
+  text(baseMean, log2FoldChange, topGene, pos=2, col="dodgerblue")
+})
+```
+
+Another useful diagnostic plot is the histogram of the p-values (figure
+below). This plot is best formed by excluding genes with very small
+counts, which otherwise generate spikes in the histogram.
+
+```{r}
+hist(res$pvalue[res$baseMean > 1], breaks = 0:20/20,
+     col = "grey50", border = "white", main = "p-value Histogram", xlab = "p-value")
+```
+
+**Histogram of *p* values for genes with mean normalized count larger
+than 1.**
+
+## Volcano plot
+
+A typical volcano plot is a scatterplot of $-log_{10}$(p-value) vs.
+$log_2$(fold-change). It allows you to visualize the difference in
+expression between groups against the statistical significance of that
+difference. Some things to look for: \* are diffentially expressed genes
+skewed towards up or down-regulation? \* are there a lot of significant
+but very low fold-change genes? This can result from a confounded batch
+effect.
+
+```{r}
+volcanoPlot <- function(res, lfc=2, pval=0.01){
+    tab = data.frame(logFC = res$log2FoldChange, negLogPval = -log10(res$pvalue))
+    plot(tab, pch = 16, cex = 0.6, xlab = expression(log[2]~fold~change), ylab = expression(-log[10]~pvalue))
+    signGenes = (abs(tab$logFC) > lfc & tab$negLogPval > -log10(pval))
+    points(tab[signGenes, ], pch = 16, cex = 0.8, col = "red") 
+    abline(h = -log10(pval), col = "green3", lty = 2) 
+    abline(v = c(-lfc, lfc), col = "blue", lty = 2) 
+    mtext(paste("pval =", pval), side = 4, at = -log10(pval), cex = 0.8, line = 0.5, las = 1) 
+    mtext(c(paste("-", lfc, "fold"), paste("+", lfc, "fold")), side = 3, at = c(-lfc, lfc), cex = 0.8, line = 0.5)
+}
+volcanoPlot(res)
+```
+
+# Model Building and Analytic Approaches
+
+This section covers some model building basics and elementary
+experimental design for bulk sequence data.
+
+## Model formulae and terminology
+
+To begin, we must familiarize ourselves with the "model formula"
+interface in R. For important details complementary to this workshop,
+please explore the following link:
+
+[Model formulae
+tutorial](http://ww2.coastal.edu/kingw/statistics/R-tutorials/formulae.html)
+
+-   It is important to know the model formula interface because many
+    regression functions in R use it.
+-   The formula determines the model that will be built (and tested) by
+    the R procedure. The basic format is:
+
+`> response variable ~ explanatory variables`
+
+-   The tilde means "is modeled by" or "is modeled as a function of."
+
+### Terminology
+
+![](image/Terminology.png)
+
+Note: order generally doesn't matter (u+v OR v+u)
+
+*Examples*: `~treatment`, `~treatment + time`, `~treatment * time`
+
+## The Design Matrix
+
+To build models, we must decide upon a design matrix. To illustrate this
+matrix, we will use an example of a multiple linear regression model:
+
+$y_i = \beta_0 + \beta_1 x_{1i} + \beta_2 x_{2i} + ... + \beta_p x_{pi} + \epsilon_i$
+
+-   $x_{ji}$ is the value of predictor $x_j$ for observation $i$
+
+Matrix notation for the multiple linear regression model:
+
+$$
+\,
+\begin{pmatrix}
+Y_1\\
+Y_2\\
+\vdots\\
+Y_N
+\end{pmatrix} = 
+\begin{pmatrix}
+1&x_1\\
+1&x_2\\
+\vdots\\
+1&x_N
+\end{pmatrix}
+\begin{pmatrix}
+\beta_0\\
+\beta_1
+\end{pmatrix} +
+\begin{pmatrix}
+\varepsilon_1\\
+\varepsilon_2\\
+\vdots\\
+\varepsilon_N
+\end{pmatrix}
+$$ where: \* $\mathbf{Y}$ is the observed expression for all read counts
+(from all conditions) for a given gene \* $\mathbf{X}$ encodes the
+condition (for RNA-seq, this is very often a discrete factor, e.g., "WT"
+or "mutant") \* $\beta_0$ is the intercept, which represents the
+expression values of the baseline condition \* $\beta_1$ is the
+regression coefficient, which captures the difference between Y from
+samples of different conditions \* $\boldsymbol{\varepsilon}$ captures
+the error or uncertainty, i.e. the difference of the regression
+estimates from the observed expression values.
+
+or more simply:
+
+$$
+\mathbf{Y}=\mathbf{X}\boldsymbol{\beta}+\boldsymbol{\varepsilon}
+$$
+
+-   The design matrix is $\mathbf{X}$
+    -   which the computer will take as a given when solving for
+        $\boldsymbol{\beta}$ by minimizing the sum of squares of
+        residuals $\boldsymbol{\varepsilon}$.
+
+It's important to note that there are multiple possible and reasonable
+design matrices for a given study design \* the model formula is used to
+encode a model matrix, for example, we can use the model formula in the
+code below to set up a design matrix with one factor variable:
+
+```{r}
+group <- factor( c(1, 1, 2, 2) )
+group
+model.matrix(~ group)
+```
+
+What if we forgot to code group as a factor? The result is that R will
+enter the variable into the matrix as a single numeric variable, with
+different numbers representing group membership, as shown in the example
+below. This is different than the result one gets when using the
+factor() function, which gives k-1 dummy variables for indicating group
+membership, where k represents the number of groups. When performing a
+regression, this can make a signficiant difference for your results, so
+it is important to be mindful of this coding!!
+
+Moreover, the factor variable can have more than two levels or
+groupings. For example, if we have a single factor predictor variable
+representing three groups, the design matrix would be set up with k-1
+(3-1) dummy variables as follows:
+
+```{r}
+group <- factor(c(1,1,2,2,3,3)) # factor variable with three groupings 
+group
+model.matrix(~ group)
+```
+
+## Contrasts
+
+It's important to note that using dummy variables in our design matrix
+involves leaving one group out for comparative purposes. The group left
+out of the design matrix is known as the baseline group (or the
+reference level) and is the one that other groups are contrasted
+against. By default, R will choose the baseline group based on either
+numerical or alphabetical order. However, you may be interested in
+specific comparisons, and so will have a need to change the baseline
+group. You can change the baseline group manually as follows:
+
+```{r}
+group <- factor(c(1,1,2,2,3,3)) # factor variable with three groups 
+group <- relevel(x=group, ref=3) # use the ref argument to make group 3 our baseline group  
+group
+model.matrix(~ group)
+```
+
+# Experimental Design
+
+For further information, we encourage you to explore [this vignette to
+approriately set up a design matrix to suit your experimental
+designs](https://bioconductor.org/packages/release/workflows/vignettes/RNAseq123/inst/doc/designmatrices.html)
+
+## Single factor design
+
+In single factor designs, you have a single factor predictor variable of
+interest, such as treatment condition. So, for example, you may have
+three mice who receive a treatment and three mice who do not and
+therefore serve as a control. This would look as follows:
+
+![](image/Single_factor_mice.png)
+
+Under this design, you would be interested in the average group
+difference on the response variable between the two condition types. To
+examine something like this, we could code our design matrix as follows:
+
+```{r}
+# Single factor design 
+condition <- factor( c("treatment", "treatment", "treatment", "control", "control", "control") )
+condition
+model.matrix(~ condition)
+```
+
+## Multi-factor design: Two factors
+
+The model matrix can be extended to represent multiple factor predictor
+variables, i.e. multiple (linear/log-linear/logistic) regression. This
+is useful, for example, in experiments where there are more than one
+factor influencing the outcome. In our previous mice example, let's say
+that in addition to condition, we introduced a variable capturing
+mutation. We would then want to account for this factor by adding it to
+the design and thus control for the additional variation in the outcome
+due to mice mutation/color. This illustration illustrates such a design:
+
+![](image/Two_factor_mice.png)
+
+Another example is if you have experimental condition samples (i.e.,
+treated vs untreated) that are balanced across experimental batches, you
+can include batch as a second factor to the design. A batch variable
+might be something like the day that you extracted the RNA from your
+sample or the cages the mice were kept in during the course of the
+experiment. In either case, the addition of factors to your design
+serves to control for additional variation in the outcome (i.e., counts)
+and increases the sensitivity for finding differences due to
+experimental condition.
+
+## Blocking
+
+Releated to multi-factor designs is the concept of blocking. Blocking is
+the arranging of experimental units into groups that are similar to one
+another. The differences between the "blocks" of individuals is
+"nuisance" variability that we want to control. In other words, we use
+this strategy to partial out (essentially remove) variability due to
+irrelavant factors in order to improve the accuracy and sensitivity of
+our estimates for variables that are of primary interest. In biology
+experiments, we typically use blocking to apply an experimental
+randomization to more homogeneous "blocks" of individuals.
+
+For example, we could use blocking to assign treated and control
+specimens, or case & control specimens, equally and randomly to batches.
+This would be referred to as **blocking on batch** and would be included
+as part of your experimental design. However, if such a consideration is
+not taken during the experimental design phase of your study, you can
+still control for nuisance variables, e.g., batch, afterwards by
+including the block as a factor in your regression analysis, as
+discussed and illustrated in the multi-factor design example.
+
+```{r}
+# Example of controlling for batch in regression analysis 
+treatment <- factor( c( "treatment", "treatment", "treatment", "control", "control", "control") )
+batch <- factor (c ("Cage_1", "Cage_1", "Cage_2", "Cage_1", "Cage_2", "Cage_2") )
+model.matrix(~ condition + batch) #here we are blocking on batch, which is cage mice were kept in 
+```
+
+The above example includes batch as a factor in our regression analysis,
+thereby controlling nuisance variance. We now can get a better estimate
+of the effect associated with experimental condition. While this is an
+acceptable approach, note that it is always advised that you include
+blocking into your experimental design whenever possible. Incorporating
+a randomized block design is preferable to using blocks as controls in a
+regression because it often simplifies statistical analyses and allows
+for stronger, more credible inferences.
+
+## Interactions
+
+When multiple factors are being considered, you are able to specify
+interaction terms via the : operator. Generally speaking, interaction
+terms tell us if the effect of one predictor on the response variable
+varies across the levels (or different values) of another predictor
+variable (see bar chart below for visual representation of this).
+
+![](image/Interaction.png)
+
+We can specify a regression with two predictor variables and an
+interaction term as follows:
+
+```{r}
+# Code for examining an interaction effect, assuming 'low dose' is control and 'high dose' is treatment
+condition <- factor( c( "treatment", "treatment", "treatment", "control", "control", "control") )
+sex <- factor (c ("female", "female", "male", "female", "male", "male") )
+model.matrix(~ condition + sex + condition:sex) #here we use the : operator to include interaction effect 
+```
+
+## Repeated Measures/Time Series
+
+It is important to briefly speak about data that includes multiple time
+points, as analyzing data arising from this design is not as
+straightforward. There are a number of ways to analyze time-series
+experiments, depending on the biological question of interest. In order
+to test for any differences over multiple time points, one can use a
+design including the time factor, and then test for time effects using
+the likelihood ratio test as described in the following section, where
+the time factor is removed in the reduced formula. For a control and
+treatment time series, one can use a design formula containing the
+condition factor, the time factor, and the interaction of the two (as
+discussed above). In this case, using the likelihood ratio test with a
+reduced model which does not contain the interaction term between
+condition and time will test whether the condition induces a change in
+gene expression at any time point after the reference level time point
+(time 0). An example of the later analysis is provided in our RNA-seq
+workflow.
+
+## Likelihood ratio test
+
+DESeq2 offers the likelihood ratio test (LRT), which is a statistical
+test that assesses the goodness of fit between two competing models.
+This test is particularly useful for time-series experiments, as
+mentioned above. The hypothesis under this test examines two models for
+the counts, a full model with a certain number of terms and a reduced
+model, in which some of the terms of the full model are removed. The
+test determines if the increased likelihood of the data using the extra
+terms in the full model is more than expected if those extra terms are
+truly zero.
+
+The LRT is therefore useful for testing multiple terms at once, for
+example, testing if there is a significant time by condition effect in a
+time series experiment. The LRT for count data is conceptually similar
+to an analysis of variance (ANOVA) calculation in linear regression,
+except that in the case of the Negative Binomial GLM, we use an analysis
+of deviance (ANODEV), where the deviance captures the difference in
+likelihood between a full and a reduced model.
+
+The likelihood ratio test can be performed by specifying test="LRT" when
+using the DESeq function, and providing a reduced design formula, e.g.
+one in which a number of terms from design(dds) are removed (e.g., time
+x condition). The degrees of freedom for the test is obtained from the
+difference between the number of parameters in the two models. A
+likelihood ratio test for the control and treatment time-series
+experiment example, where the full design was \~condition + time +
+condition:time, would look like:
+
+`dds <- DESeq(dds, test="LRT", reduced=~condition + time)`
+
+`res <- results(dds)`
+
+**Important Note:** The above is just one example of how to deal with
+time series data. In general, data involving measurements taken over
+time requires careful consideration, as repeated measurements create a
+statistical dependency in your data that needs to be accounted for. If
+this dependency structure goes unaccounted for or is inappropriately
+handled, your estimates, and thus the inferences you make, can become
+biased. Therefore, it is recommended that you consult with a
+statistician when analyzing repeated measure data.
+
+## R Packages for performing differential expression analyses
+
+We could use a variety of Bioconductor packages for more exploration and
+differential expression analysis of the count data, including: \*
+[DESeq2](http://www.bioconductor.org/packages/DESeq2) \*
+[edgeR](http://www.bioconductor.org/packages/edgeR) \*
+[limma](http://www.bioconductor.org/packages/limma) (use Voom method for
+RNA-seq)
+
+[Schurch *et al.*
+2016](https://www.ncbi.nlm.nih.gov/pmc/articles/pmid/27022035/) compared
+performance of different statistical methods for RNA-seq using a large
+number of biological replicates and can help users to decide which tools
+make sense to use, and how many biological replicates are necessary to
+obtain a certain sensitivity.
+
+### Comparison of edgeR / DESeq2 / limma-voom
+
+**DESeq2**, **edgeR**, and **limma-voom** are all well-documented
+packages. They each implement similar key features:
+
+-   Empirical Bayes "regularization" or "shrinkage" of expression
+    variance
+    -   borrows prior expectation for variance from all genes, reduces
+        false positives in small samples
+-   Use of model formula, model matrices, and contrasts for flexible
+    differential expression analysis\
+-   Reporting of log fold-change and False Discovery Rate
+
+Some ways they differ are: \* Error terms used: **DESeq2** and **edgeR**
+use log-linear Generalized Linear Model with negative binomial error
+term , **limma-voom** uses linear regression on transformed counts
+
+-   **DESeq2** "automagically" handles independent filtering, using
+    Independent Hypothesis Weighting ([IHW
+    package](http://www.bioconductor.org/packages/IHW))
+-   Speed (**limma-voom** is much faster and should definitely be used
+    if you have hundreds of samples)
+-   Approaches to hierarchical modeling, e.g. samples nested within
+    groups
+    -   limma-voom has a built-in feature for sample correlations
+        (called *duplicateCorrelation*)
+-   Re-use of core Bioconductor structures (DESeq2 extends
+    *SummarizedExperiment*, edgeR and limma create their own)
+
+DEseq2 is generally a practical and simple pipeline to run. However, for
+large datasets, especially if doing permutations for gene set enrichment
+analysis, limma with its voom method is far more practical. It is worth
+noting that for large sample sizes, it hardly matters which error model
+you use, owing to the Central Limit Theorem.
+
+# Introduction to Epigenomics Data
+
+# Abstract
+
+This portion of the workshop introduces ChIPseq and ATACseq analysis
+using R, including common file types, importing peaksets, exploratory
+data analysis and visualizations, data transformations, and statistical
+testing of differential peaks. It uses quotes and materials from
+[DiffBind: Differential binding analysis of ChIP-Seq peak
+data](https://bioconductor.org/packages/release/bioc/vignettes/DiffBind/inst/doc/DiffBind.pdf)
+by Rory Stark and Gord Brown, and workshops from [Harvard Chan
+Bioinformatics Core
+(HBC)](https://hbctraining.github.io/Intro-to-ChIPseq/), and [CRUK
+Cambridge
+Institute](https://bioinformatics-core-shared-training.github.io/cruk-summer-school-2020/).
+
+## Outline
+
+1.  Introduction to Epigenomics Data
+    -   What is Epigenomics?
+    -   Some more resources
+    -   Computational workflow overview
+2.  Standard data types
+    -   BED
+    -   Bedgraph
+    -   Wiggle and bigwig
+3.  DiffBind
+    -   DiffBind Workflow
+    -   Reading in peaks
+    -   Occupancy analysis
+    -   Counting reads
+    -   Normalizing data
+    -   Establishing a model design and contrast
+    -   Performing the differential affinity analysis
+    -   Retreiving the differentially bound sites
+4.  Plotting and reporting in DiffBind
+    -   Venn Diagrams
+    -   PCA plots
+    -   MA plots
+    -   Volcano plots
+    -   Boxplots
+    -   Heatmaps
+    -   Profile plots
+5.  Annotating Peaks and integrating with RNAseq
+
+## What is Epigenomics?
+
+In the previous section of this workshop, we discussed working with
+transcriptome or RNAseq data. Transcription is a process that is
+regulated by chromatin accessibility and the binding of transcription
+factors/histone motifiers. We will focus on methods that could be used
+to process these types of data, such as ChIPseq or ATACseq data.
+
+In the case of ChIPseq, DNA is cross-linked and the chromatin is
+fragmented and immunoprecipitated using an antibody specific to the
+transcription factor of interest. The DNA captured by the
+immunoprecipitation is used for library preparation and sequencing. In
+the case of ATACseq, a Tn5 transposase enzyme will cut DNA and insert
+sequencing adapters in open chromatin regions of the genome
+('tagmentation'). These tagged fragments are sequenced and can be used
+to infer regions of increased chromatin accessibility.
+
+![](image/chip_and_atac.png){width="80%"}
+
+## Some more resources:
+
+ENCODE project has guidance for experimental design, data processing,
+and quality standars for ATACseq
+(https://www.encodeproject.org/atac-seq/) and ChIPseq
+(https://www.encodeproject.org/chip-seq/transcription_factor/,
+https://www.encodeproject.org/chip-seq/histone/)/. There's also this
+review article about ATACseq [From reads to insight: a hitchhiker's
+guide to ATAC-seq data
+analysis](https://genomebiology.biomedcentral.com/articles/10.1186/s13059-020-1929-3)
+by Feng Yan, David Powell, David Curtis, and Nicholas Wong; and this
+review article about ChIPseq [ChIP--seq: advantages and challenges of a
+maturing technology](https://www.nature.com/articles/nrg2641) by Peter
+Park.
+
+## Computational workflow overview
+
+The earliest stages of a ChIPseq or ATACseq analysis are similar to
+RNAseq experiments - you start with running QC on your raw reads and
+then aligning them to a reference genome. Instead of a counts matrix,
+you mark duplicates in your alignment files (.SAM or .BAM files) using a
+program such as PicardTools. Duplicates are a technical artifact of some
+sequencing technologies, there's a detailed technical blog post here:
+https://sequencing.qcfail.com/articles/illumina-patterned-flow-cells-generate-duplicated-sequences/.
+Then you run peak calling to find regions where chromatin is open
+(ATACseq) or a transcription factor has bound (ChIPseq). You can also
+generate bedgraph or bigwig files to manually inspect your alignments in
+IGV or UCSC genome browser. If the duplicate marking and manual
+inspection shows many duplicates (e.g., reads that map to the same exact
+start/stop site in your alignments), you can optionally remove
+duplicates.
+
+![](image/chipseq_workflow.png)
+
+# Standard data types
+
+There are many file formats used to represent and describe features
+(peaks) in your data. UCSC links to a series of tools and utilities to
+convert between different file types https://genome.ucsc.edu/util.html.
+
+The most common ones are BED, bedgraph, wiggle, and Bigwig. These files
+can be either 0-based (half open) or 1-based (closed). If 0-based, the
+counting starts at 0 and you are counting the spaces between the bases.
+If 1-based, you start counting at 1 and are counting each base (see
+https://hbctraining.github.io/Intro-to-ChIPseq/lectures/Fileformats.pdf
+and
+https://tidyomics.com/blog/2018/12/09/2018-12-09-the-devil-0-and-1-coordinate-system-in-genomics/).
+
+![](image/genomic_coordinate.png){width="80%"}
+
+## BED
+
+One way you might see peaks represented is in a `BED` file
+(https://genome.ucsc.edu/FAQ/FAQformat#format1,
+https://grch37.ensembl.org/info/website/upload/bed.html). The BED format
+has 1 row per feature or peak and has 3 required fields that are tab or
+whitespace delimited:
+
+**chrom** - The name of the chromosome (e.g. chr3, chrY, chr2_random) or
+scaffold (e.g. scaffold10671). Many assemblies also support several
+different chromosome aliases (e.g. '1' or 'NC_000001.11' in place of
+'chr1').
+
+**chromStart** - The starting position of the feature in the chromosome
+or scaffold. The first base in a chromosome is numbered 0.
+
+**chromEnd** - The ending position of the feature in the chromosome or
+scaffold.
+
+There are also 9 additional optional fields that are discussed in the
+UCSC link. Bed files are not compressed and are 0-based.
+
+## Bedgraph
+
+Bedgraph files can be used to visualize tracks in UCSC genome browser or
+IGV (https://genome.ucsc.edu/goldenPath/help/bedgraph.html). It also has
+1 row per feature or gene and is similar to a BED file, but includes a
+4th column where there's a `score` that indicates peak intensity or
+coverage. They are not compressed and are 0-based.
+
+## Wiggle and bigwig files
+
+Wiggle and bigwig files are also used to view tracks of peaks in a
+browser. You can read more about wiggle
+(https://genome.ucsc.edu/goldenPath/help/wiggle.html) and bigwig files
+(https://genome.ucsc.edu/goldenPath/help/bigWig.html) here
+https://hbctraining.github.io/Intro-to-ChIPseq/lectures/Fileformats.pdf.
+Data in wiggle files must be continuous and broken into equally sized
+elements. Wiggle files get quite large, so I would suggest converting to
+bigwig. Bigwig is faster than either wiggle or bedgraph, so you might
+want to use utilities
+(https://www.encodeproject.org/software/bedgraphtobigwig/) to make
+BigWig files to view large datasets. Unlike BED and bedgraph, they are
+1-based.
+
+https://hbctraining.github.io/Investigating-chromatin-biology-ChIPseq/lessons/07_handling_peaks_bedtools.html
+
+# DiffBind
+
+DiffBind is an R package for identifying site that are differentially
+bound between sample groups. It is designed to work with alignments and
+lists of enriched loci or peak sets. Peak sets are derived from a peak
+caller and represent sets of genomic intervals or ranges that represent
+potential protein binding sites. Each interval will have a chromosome,
+start and end position, and a score indicating the strength of the peak.
+It includes functions to support the processing of peak sets, including
+overlapping and merging peak sets, counting sequencing reads overlapping
+intervals in peak sets, and identifying statistically significantly
+differentially bound sites based on evidence of binding affinity
+(measured by differences in read densities). To this end it uses
+statistical routines developed in an RNA-Seq context (primarily the
+Bioconductor packages edgeR and DESeq2). Additionally, the package
+builds on Rgraphics routines to provide a set of standardized plots to
+aid in binding analysis.
+
+## DiffBind Workflow
+
+1.  **Reading in peaksets:** The first step is to read in a set of
+    peaksets and associated metadata. Peaksets are derived either from
+    ChIP-Seq peak callers, such as MACS, or using some other criterion
+    (e.g. genomic windows, or all the promoter regions in a genome). The
+    easiest way to read in peaksets is using a comma-separated value
+    (csv) sample sheet with one line for each peakset. (Spreadsheets in
+    Excel® format, with a .xls or .xlsx suffix, are also accepted.) An
+    individual sample can have more than one associated peakset; e.g. if
+    multiple peak callers are used for comparison purposes each sample
+    would have more than one line in the sample sheet.
+
+2.  **Occupancy analysis:** Peaksets, especially those generated by peak
+    callers, provide an insight into the potential occupancy of the
+    protein being ChIPed for at specific genomic loci. After the
+    peaksets have been loaded, it can be useful to perform some
+    exploratory plotting to determine how these occupancy maps agree
+    with each other, e.g. between experimental replicates (re-doing the
+    ChIP under the same conditions), between different peak callers on
+    the same experiment, and within groups of samples representing a
+    common experimental condition. DiffBind provides functions to enable
+    overlaps to be examined, as well as functions to determine how well
+    similar samples cluster together. In addition, peaks may be filtered
+    based on published blacklists of region known to be problematic, as
+    well as custom greylists derived from control track specific to the
+    experiment (see Section 6). Beyond quality control, the product of
+    an occupancy analysis may be a consensus peakset, representing an
+    overall set of candidate binding sites to be used in further
+    analysis.
+
+3.  **Counting reads:** Once a consensus peakset has been derived,
+    DiffBind can use the supplied sequence read files to count how many
+    reads overlap each interval for each unique sample. By default, the
+    peaks in the consensus peakset are re-centered and trimmed based on
+    calculating their summits (point of greatest read overlap) in order
+    to provide more standardized peak intervals. The final result of
+    counting is a binding affinity matrix containing a read count for
+    each sample at every consensus binding site, whether or not it was
+    identified as a peak in that sample. With this matrix, the samples
+    can be re-clustered using affinity, rather than occupancy, data. The
+    binding affinity matrix is used for QC plotting as well as for
+    subsequent differential analysis.
+
+4.  **Differential binding affinity analysis:** The core functionality
+    of DiffBind is the differential binding affinity analysis, which
+    enables binding sites to be identified that are significantly
+    differentially bound between sample groups. This step includes
+    normalizing the experimental data and establishing a model design
+    and a contrast (or contrasts). Next the underlying core analysis
+    routines are executed, by default using DESeq2 . This will assign a
+    p-value and FDR to each candidate binding site indicating confidence
+    that they are differentially bound.
+
+5.  **Plotting and reporting:** Once one or more contrasts have been
+    run, DiffBind provides a number of functions for reporting and
+    plotting the results. MA and volcano plots give an overview of the
+    results of the analysis, while correlation heatmaps and PCA plots
+    show how the groups cluster based on differentially bound sites.
+    Boxplots show the distribution of reads within differentially bound
+    sites corresponding to whether they gain or lose affinity between
+    the two sample groups. A reporting mechanism enables differentially
+    bound sites to be extracted for further processing, such as
+    annotation, motif, and pathway analyses.
+
+## Reading in Peaks
+
+We will use a sample sheet to process our data. Columns names in sample
+sheet may include:
+
+1.  SampleID: Identifier string for sample. Must be unique for each
+    sample.
+2.  Tissue: Identifier string for tissue type
+3.  Factor: Identifier string for factor
+4.  Condition: Identifier string for condition
+5.  Treatment: Identifier string for treatment
+6.  Replicate: Replicate number of sample
+7.  bamReads: file path for bam file containing aligned reads for ChIP
+    sample
+8.  bamControl: file path for bam file containing aligned reads for
+    control sample
+9.  Spikein: file path for bam file containing aligned spike-in reads
+10. ControlID: Identifier string for control sample
+11. Peaks: path for file containing peaks for sample. Format determined
+    by PeakCaller field or caller parameter
+12. PeakCaller: Identifier string for peak caller used. If Peaks is not
+    a bed file, this will determine how the Peaks file is parsed. If
+    missing, will use default peak caller specified in caller parameter.
+    Possible values:
+
+-   "raw": text file file; peak score is in fourth column
+-   "bed": .bed file; peak score is in fifth column
+-   "narrow": default peak.format: narrowPeaks file
+-   "macs": MACS .xls file
+-   "swembl": SWEMBL .peaks file
+-   "bayes": bayesPeak file
+-   "peakset": peakset written out using pv.writepeakset
+-   "fp4": FindPeaks v4
+
+13. PeakFormat: string indicating format for peak files; see PeakCaller
+    and dba.peakset
+14. ScoreCol: column in peak files that contains peak scores
+15. LowerBetter: logical indicating that lower scores signify better
+    peaks
+16. Counts: file path for externally computed read counts
+
+For sample sheets loaded from a file, the accepted formats are
+comma-separated values (column headers, followed by one line per
+sample), or Excel-formatted spreadsheets (.xls or .xlsx extension).
+Leading and trailing white space will be removed from all values, with a
+warning.
+
+Let's load some libraries:
+
+```{r}
+#.libPaths(c( "/usr/local/lib/R/site-library", "/usr/local/lib/R/library","/users/jwalla12/R/x86_64-pc-linux-gnu-library/4.3"    ))
+
+library(DiffBind)
+library(ChIPpeakAnno)
+library(ChIPseeker)
+library(ChIPQC)
+library(magrittr)
+library(tidyr)
+```
+
+We will work with the Tamoxifen data that comes with DiffBind. Look at
+the sample sheet
+
+```{r}
+samples <- read.csv("/oscar/data/shared/databases/workshops/bootcamp_2025/DiffBind_Vignette/tamoxifen.csv")
+head(samples)
+```
+
+Read in the peakset as a DBA object:
+
+```{r}
+tamoxifen <- dba(sampleSheet=samples)
+tamoxifen
+```
+
+Using the data from the peak calls, a correlation heatmap can be
+generated which gives an initial clustering of the samples using the
+cross-correlations of each row of the binding matrix:
+
+```{r}
+plot(tamoxifen)
+```
+
+## Counting reads
+
+The next step is to calculate a binding matrix with scores based on read
+counts for every sample (affinity scores), rather than confidence scores
+for only those peaks called in a specific sample (occupancy scores).
+
+```{r}
+tamoxifen <- dba.count(tamoxifen)
+```
+
+```{r}
+tamoxifen
+```
+
+This shows that all the samples are using the same, approximately 2800
+site consensus peakset. Also, two new columns have been added. The first
+(Reads) shows the total number of aligned reads for each sample (the
+"Full" library sizes). The second is labeled FRiP, which stands for
+Fraction of Reads in Peaks. This is the proportion of reads for that
+sample that overlap a peak in the consensus peakset, and can be used to
+indicate which samples show more enrichment overall. For each sample,
+multiplying the value in the Reads column by the corresponding FRiP
+value will yield the number of reads that overlap a consensus peak. This
+can be done using the dba.show function:
+
+```{r}
+info <- dba.show(tamoxifen)
+libsizes <- cbind(LibReads=info$Reads, FRiP=info$FRiP,PeakReads=round(info$Reads * info$FRiP))
+rownames(libsizes) <- info$ID
+libsizes
+```
+
+We can also plot a new correlation heatmap based on the count scores.
+While this shows a slightly different clustering, with overall higher
+levels of correlation (due to using normalized read counts instead of
+whether or not a peak was called), responsiveness to tamoxifen treatment
+does not appear to form a basis for clustering when using all of the
+affinity scores.
+
+```{r}
+plot(tamoxifen)
+```
+
+## Blacklists
+
+You can optionally include a specific blacklist at this point. The
+difference between blacklists and greylists:
+
+-   Blacklists are pre-defined lists of regions specific to a reference
+    genome that are known to be problematic. The best known lists have
+    been identified as part of the ENCODE project and are available for
+    a variety of reference genomes and genome versions. The current
+    ENCODE blacklists are available through the dba.blacklist function.
+
+-   Greylists are specific to a ChIP-seq experiment, and are derived
+    from the controls generated as part of the experiment. The idea is
+    to analyze libraries that are not meant to show systematic
+    enrichment (such as Inputs, in which no anti-body is introduced),
+    and identify anomalous regions where a disproportionate degree of
+    signal is present. These regions can then be excluded from
+    subsequent analysis.
+
+DiffBind has several blacklists included (which we use later), but you
+can also use your own as long as you convert them to a GRanges object.
+We aren't including a blacklist here, but if we did it might look like
+this:
+
+```{r}
+#tamoxifen <- dba.blacklist(tamoxifen, blacklist=custom_blacklist)
+```
+
+You can even remove blacklists from your bam files before running peak
+calling using bedtools intersect (see
+https://bedtools.readthedocs.io/en/latest/content/tools/intersect.html):
+
+`bedtools intersect -v -abam yourbam -b blacklist.bed > filtered.bam`
+
+## Normalizing data
+
+Next is normalization. By default, the data are normalized based on
+sequencing depth. The DiffBind documentation has a detailed section on
+different normalization options, including suggestions for normalization
+methods for non-ChIPseq data (for example, with background normalization
+for ATACseq or with spike-in controls for cut&run).
+(https://bioconductor.org/packages/release/bioc/vignettes/DiffBind/inst/doc/DiffBind.pdf#section.7)
+
+```{r}
+tamoxifen <- dba.normalize(tamoxifen)
+```
+
+Look at the details of the normalization:
+
+```{r}
+norm <- dba.normalize(tamoxifen, bRetrieve=TRUE)
+norm
+```
+
+This shows the normalization method used (lib), the calculated
+normalization factors for each sample, and the full library sizes (which
+include the total number of reads in the associated .bam files).
+
+## Establishing a model design and contrast
+
+Before running the differential analysis, we need to tell DiffBind how
+to model the data, including which comparison(s) we are interested in.
+This is done using the dba.contrast function, as follows:
+
+```{r}
+tamoxifen <- dba.contrast(tamoxifen, reorderMeta=list(Condition="Responsive"))
+```
+
+This call will set up any "default" contrasts by examining the project
+metadata factors and assuming we want to look at the differences between
+any two sample groups with at least three replicates in each side of the
+comparison (that is, any factor that has two different values where
+there are at least three samples that share each value.) It also
+establishes the Responsive condition as the baseline, so it will be in
+the denominator of the default contrast. In the current case, there is
+only one such comparison that qualifies: The Condition metadata factor
+has two values, Resistant and Responsive, that have at least three
+replicates each (there are four Resistant sample replicates and seven
+Responsive sample replicates.) This function also establishes the
+default design, which includes only the metadata factor directly
+involved in the contrast (Condition).
+
+## Performing the differential affinity analysis
+
+Then we run the main differential analysis. If you have already included
+a blacklist or a greylist earlier in the analysis, you can use the
+arguments `bBlacklist=FALSE` or `bGreylist=FALSE`, otherwise DiffBind
+will try to find an appropriate blacklist to use.
+
+```{r}
+tamoxifen <- dba.analyze(tamoxifen)
+tamoxifen
+```
+
+In situations where you don't have replicates (not recommended), of if
+you want to compare specific groups, you will have to create masks to
+indicate which samples are which:
+
+```{r}
+#resistant<- dba.mask(tamoxifen, DBA_CONDITION, "Resistant")
+#responsive <- dba.mask(tamoxifen, DBA_CONDITION, "Responsive")
+#tamoxifen <- dba.contrast(tamoxifen, group1 = resistant, group2=responsive )
+```
+
+## Retrieving the differentially bound sites
+
+The final step is to retrieve the differentially bound sites. We only
+set a single contrast, so the contrast argument is redundant here but
+would be necessary if you specified different contrasts on the same DBA
+object.
+
+```{r}
+tamoxifen.DB <- dba.report(tamoxifen, contrast = 1)
+```
+
+The results are returned as a GRanges object, but you can convert them
+to a dataframe and filter the results:
+
+```{r}
+as.data.frame(tamoxifen.DB) %>% dplyr::filter(FDR <= .05) %>% dplyr::filter(Fold > 1)
+```
+
+# Plotting in DiffBind
+
+Besides the correlation heatmaps we have been looking at, a number of
+other plots are available using the affinity data. This section covers
+Venn diagrams, MA plots, Volcano plots, PCA plots, Boxplots, and
+Heatmaps.
+
+## Venn diagrams
+
+Venn diagrams illustrate overlaps between different sets of peaks. For
+example, amongst the differentially bound sites, we can see the
+differences between the "Gain" sites (those that increase binding
+enrichment in the Resistant condition) and the "Loss" sites (those with
+lower enrichment) as follows:
+
+```{r}
+dba.plotVenn(tamoxifen, contrast=1, bDB=TRUE,bGain=TRUE, bLoss=TRUE, bAll=FALSE)
+```
+
+## PCA plots
+
+While the correlation heatmaps already seen are good for showing
+clustering, plots based on principal components analysis can be used to
+give a deeper insight into how samples are associated.
+
+```{r}
+dba.plotPCA(tamoxifen,DBA_TISSUE,label=DBA_CONDITION)
+```
+
+## MA plots
+
+MA plots are a useful way to visualize the relationship between the
+overall binding level at each site and the magnitude of the change in
+binding enrichment between conditions, as well as the effect of
+normalization on data. An MA plot can be obtained for the Resistant vs
+Responsive contrast as follows:
+
+```{r}
+dba.plotMA(tamoxifen, contrast = 1)
+```
+
+Each point represents a binding site, with the points in magenta
+representing sites identified as differentially bound. There is a blue
+horizontal line through the origin (0 LFC), as well as a horizontal red
+curve representing a non-linear loess fit showing the underlying
+relationship between coverage levels and fold changes. The plot shows
+how the differentially bound sites appear to have a minimum absolute log
+fold difference of somewhere between one and two. As we have already
+seen, it also shows that more ERa binding sites lose binding affinity in
+the tamoxifen resistant condition than gain binding affinity, as
+evidenced by more red dots below the center line than are above it. This
+same data can also be shown with the concentrations of each sample
+groups plotted against each other plot using dba.plotMA(tamoxifen,
+bXY=TRUE)
+
+## Volcano plots
+
+Similar to MA plots, Volcano plots also highlight significantly
+differentially bound sites and show their fold changes. Here, however,
+the confidence statistic (FDR or p-value) is shown on a negative log
+scale, helping visualize the relationship between the magnitude of fold
+changes and the confidence that sites are differentially bound.
+
+```{r}
+dba.plotVolcano(tamoxifen)
+```
+
+Volcano plot of Resistant-Responsive contrast. Sites identified as
+significantly differentially bound shown in red.
+
+## Boxplots
+
+Boxplots provide a way to view how read distributions differ between
+classes of binding sites. Consider the example, where 311 differentially
+bound sites are identified. The MA plot shows that these are not
+distributed evenly between those that increase binding affinity in the
+Responsive group vs. those that increase binding affinity in the
+Resistant groups. This can be seen quantitatively using the sites
+returned in the report:
+
+```{r}
+sum(tamoxifen.DB$Fold<0)
+sum(tamoxifen.DB$Fold>0)
+```
+
+But how are reads distributed amongst the different classes of
+differentially bound sites and sample groups? These data can be more
+clearly seen using a boxplot:
+
+```{r}
+dba.plotBox(tamoxifen)
+```
+
+Box plots of read distributions for significantly differentially bound
+(DB) sites. Tamoxifen Resis- tant samples are shown in blue, and
+Responsive samples are shown in red. Left two boxes show distribution of
+reads over all DB sites in the Resistant and Responsive groups; middle
+two boxes show distributions of reads in DB sites that increase in
+affinity in the Resistant group; last two boxes show distributions of
+reads in DB sites that increase in affinity in the Responsive group.
+
+## Heatmaps
+
+DiffBind provides two types of heatmaps. This first, correlation
+heatmaps, we have already seen:
+
+```{r}
+dba.plotHeatmap(tamoxifen)
+```
+
+Another way to view the patterns of binding affinity directly in the
+differentially bound sites is via a binding affinity heatmap, showing
+the read scores for some or all of the binding sites. This can be
+plotted for the example case as follows
+
+```{r}
+hmap <- colorRampPalette(c("#fc8d59", "#ffffbf", "#91bfdb"))(n = 13)
+dba.plotHeatmap(tamoxifen, contrast=1, correlations=FALSE, scale="row", colScheme = hmap)
+```
+
+The heatmap shows the affinities and clustering of the differentially
+bound sites (rows), as well as the sample clustering (columns). In this
+case, the (normalized) counts have been row scaled, and a
+colorblind-safe heatmap color palette applied
+
+## Profile plots
+
+The dba.plotProfile() function enables the computation of peakset
+profiles and the plot- ting of complex heatmaps. It serves as a
+front-end to enable experiments analyzed using DiffBind to more easily
+use the profiling and plotting functionality provided by the profileplyr
+package written by Tom Carroll and Doug Barrows (see
+https://bioconductor.org/packages/ release/bioc/html/profileplyr.html).
+
+Processing proceeds in two phases.
+
+In the first phase, specific peaksets are extracted from a DiffBind DBA
+object and profiles are calculated for these peaks for set of samples in
+the DiffBind experiment. Profiles are calculated by counting the number
+of overlapping reads in a series of bins upstream and downstream of each
+peak center.
+
+In the second phase, the derived profiles are plotted in a series of
+complex heatmaps showing the relative intensity of overlapping peaks in
+each bin for each peak in each sample, along with summary plots showing
+the average profile across the sites for each sample. Due to the
+computational cost of this function, it is advised that the calculation
+of profiles and the plotting be separated into two calls, so that the
+profiles do not need to be re- generated if something goes wrong in the
+plotting.
+
+By default, when a DBA object is passed in to generate profiles,
+plotting is turned off and a profileplyr object is returned. When
+dba.plotProfile() is called with a profileplyr object, a plot is
+generated by default. The main aspects of the profile plot are which
+samples are plotted (the X-axis) and which sites are plotted (the
+Y-axis). These can be specified in a number of flexible ways. Other pa-
+rameters to dba.plotProfile() determine how the data are treated,
+controlling aspects such as how many sites are included in the plot,
+data normalization, sample merging (computing mean profiles for groups
+of samples), and control over the appearance of the plot.
+
+See section 4.7 of the DiffBind docs for more details:
+https://bioconductor.org/packages/release/bioc/vignettes/DiffBind/inst/doc/DiffBind.pdf
+
+```{r}
+profiles <- dba.plotProfile(tamoxifen)
+dba.plotProfile(profiles)
+```
+
+If an analysis has been completed, the default plot will be based on the
+results of the first contrast. If the contrast compares two conditions,
+all of the samples in each condition will be included, with the heatmaps
+colored separately for samples in each contrast condition.
+
+Sample groups are merged based on the DBA_REPLICATE attribute, such that
+each sample class will have one heatmap based on the normalized mean
+read counts for all the samples in that class that have the same
+metadata except for the Replicate number
+
+In terms of sites, two groups of differentially bound sites are
+included: Gain sites (with positive fold change) and Loss sites
+(negative fold change). If there are more than 1,000 sites in either
+category, the 1,000 sites with the great absolute value fold change will
+be included (the maximum number of sites to be profiled can be altered).
+
+This plot shows how the differentially bound sites are divided into Gain
+and Loss groups, and how sample groups belonging to each of the two
+contrast conditions (Resistant and Responsive) result in differently
+colored heatmaps.
+
+## Peak annotation with ChIPseeker
+
+Now that we have a list of differential peaks, we might want to put our
+peaks into context by determining their location on the genome relative
+to genes or other features. We will use ChIPseeker, but you could also
+use ChIPpeakAnno
+(https://www.bioconductor.org/packages/release/bioc/html/ChIPpeakAnno.html)
+or ChIPQC
+(https://www.bioconductor.org/packages/release/bioc/html/ChIPQC.html).
+
+A TxDb object connects a set of genomic coordinates to
+transcript-oriented features. It also contains feature IDs for
+transcripts and genes so TxDb objects can be used to link gene IDs and
+transcript IDs.
+
+```{r}
+library(TxDb.Hsapiens.UCSC.hg19.knownGene)
+txdb <- TxDb.Hsapiens.UCSC.hg19.knownGene
+```
+
+An OrgDb is an organism-specific, genome wide annotation. We can use it
+to map between different gene ID types using a central identifier
+(usually Entrez gene ID). OrgDb names are always of the form:
+org.Ab.id.db (e.g. org.Sc.sgd.db) where Ab is a 2-letter abbreviation of
+the organism and id is an abbreviation (in lower-case) describing the
+type of central identifier (`eg` for Entrez Gene ids)
+
+```{r}
+library(org.Hs.eg.db)
+```
+
+We can use the ChIPseeker package function annotatePeak to determine the
+structural annotations.
+
+```{r}
+peakAnno <- annotatePeak(peak = tamoxifen.DB, TxDb=txdb, annoDb = 'org.Hs.eg.db', tssRegion=c(-1000, 1000), verbose=FALSE)
+```
+
+Here we are annotating only the significant peaks from the Tamoxifen
+contrasts, but in theory we could annotate the entire consensus peakset
+like this:
+
+```{r}
+consensus <- dba(tamoxifen, tamoxifen$masks$Consensus, minOverlap=1)
+consensus.peaks <- dba.peakset(consensus, bRetrieve=TRUE)
+consensus_peakAnno <- annotatePeak(peak = consensus.peaks, TxDb=txdb, annoDb = 'org.Hs.eg.db',  tssRegion=c(-1000, 1000), verbose=FALSE, columns = c("ENTREZID", "ENSEMBL", "SYMBOL", "GENENAME"))
+
+```
+
+Then visualize the results as a pie or bar chart:
+
+```{r}
+plotAnnoBar(peakAnno)
+plotAnnoPie(peakAnno)
+```
+
+We can also visualize the distance to TSS
+
+```{r}
+plotDistToTSS(peakAnno, title="Distribution of transcription factor-binding loci\nrelative to TSS")
+```
+
+If we convert the peakAnno object to a dataframe, we can see lots of
+additional information. This includes the peak locations, concentration
+of reads in peaks in the Resistant and Responsive condition, statistical
+information, information about the peak structural annotation, and
+information about the nearest gene TSS and the distance between the peak
+and the TSS.
+
+```{r}
+peakAnno_df <- as.data.frame(peakAnno)
+peakAnno_df %>% dplyr::filter(abs(distanceToTSS) <= 5000)
+```
+
+We can use this information to run enrichment analysis:
+
+```{r}
+pathway1 <- enrichPathway(as.data.frame(peakAnno)$geneId)
+pathway1
+dotplot(pathway1)
+```
