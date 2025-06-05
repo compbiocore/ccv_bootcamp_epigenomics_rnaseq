@@ -29,8 +29,9 @@ Fill in the fields as follows:
 -   `Package install Path`: leave blank\
 -   `Path for R Executable`: \~/scratch\
 -   `R Module`: leave blank\
--   `Additional Data Path`: /oscar/data/shared/databases/workshops/bootcamp_2025/DiffBind_Vignette
--   `Reservation`: leave blank\
+-   `Additional Data Path`:
+    /oscar/data/shared/databases/workshops/bootcamp_2025/DiffBind_Vignette
+-   `Reservation`: bootcamp
 
 Once your job starts, click the button to connect to session.\
 At the top of the screen you'll see a menu bar that starts with 'file',
@@ -41,14 +42,22 @@ the repo you cloned.\
 
 # Abstract
 
-This portion of the workshop introduces strategies for R processing of DNA data enriched for genomic loci, 
-such as ChIPseq and ATACseq. We will discuss including common file types, 
-importing peaksets, exploratory data analysis and visualizations, data transformations, and statistical
-testing of differential peaks. It uses quotes and materials from [DiffBind: Differential binding analysis of ChIP-Seq peak
+This portion of the workshop introduces strategies for R processing of
+DNA data enriched for genomic loci, such as ChIPseq and ATACseq. We will
+talk about common file types, importing peaksets, exploratory data
+analysis and visualizations, data transformations, statistica ltesting
+of differential peaks, and peak annotation. It uses quotes and materials
+from [DiffBind: Differential binding analysis of ChIP-Seq peak
 data](https://bioconductor.org/packages/release/bioc/vignettes/DiffBind/inst/doc/DiffBind.pdf)
-by Rory Stark and Gord Brown, and workshops from [Harvard Chan Bioinformatics Core
-(HBC)](https://hbctraining.github.io/Intro-to-ChIPseq/), and [CRUK Cambridge
-Institute](https://bioinformatics-core-shared-training.github.io/cruk-summer-school-2020/).
+by Rory Stark and Gord Brown, and workshops from [Harvard Chan
+Bioinformatics Core
+(HBC)](https://hbctraining.github.io/Intro-to-ChIPseq/), and [CRUK
+Cambridge
+Institute](https://bioinformatics-core-shared-training.github.io/cruk-summer-school-2020/).\
+If you need additional help with sequencing data analysis, experimental
+design, or setting up your design matrix, the Computational Biology Core
+hosts weekly officehours. Please see the [CCV Calendar for an up-to-date
+schedule](https://events.brown.edu/ccv/week).
 
 ## Outline
 
@@ -77,46 +86,39 @@ Institute](https://bioinformatics-core-shared-training.github.io/cruk-summer-sch
     -   Boxplots
     -   Heatmaps
     -   Profile plots
-5.  Annotating Peaks and integrating with RNAseq
+5.  Peak annotation with ChIPseeker
 
 ## What is Epigenomics?
+
 The central dogma of biology refers to the concept that in general,
 biological information flows from DNA to RNA to proteins, which are the
 molecules that encode for various enzymes etc., that help a living
-organism maintain homeostasis and self-regulate. For this portion of the 
-workshop, we discuss how the transcription from DNA to RNA is regulated. 
-Transcription is a process that is regulated by chromatin accessibility 
-and the binding of transcription factors/histone motifiers. We will focus on 
-methods that could be used to process these types of data, such as ChIPseq or 
-ATACseq data.
+organism maintain homeostasis and self-regulate. For this portion of the
+workshop, we discuss how the transcription from DNA to RNA is regulated.
+Transcription is a process that is regulated by chromatin accessibility
+and the binding of transcription factors/histone motifiers. We will
+focus on methods that could be used to more closely examine this
+process, such as ChIPseq or ATACseq data.
 
-The general experimental process involves extracting RNA from your
-different experimental conditions, performing the library preparation
-steps (e.g., cDNA synthesis, fragmentation, and adding adapters). These
-libraries are sequenced on an Illumina FlowCell. The output from this
-process is these raw reads (.fastq or .fq files), which you can then
-align to the appropriate reference genome or transcriptome, where more
-reads will align to more highly expressed genes. This data can be
-processed to get back a counts matrix which will let you look at
-differential expression and perform other downstream analyses.
-
-In the case of ChIPseq, DNA is cross-linked and the chromatin is
-fragmented and immunoprecipitated using an antibody specific to the
-transcription factor of interest. The DNA captured by the
-immunoprecipitation is used for library preparation and sequencing. In
-the case of ATACseq, a Tn5 transposase enzyme will cut DNA and insert
-sequencing adapters in open chromatin regions of the genome
-('tagmentation'). These tagged fragments are sequenced and can be used
-to infer regions of increased chromatin accessibility. The output from this
-process is these raw reads (.fastq or .fq files), which you can then
-align to the appropriate reference genome, where more
-reads will align to areas of open chromatin (ATACseq) or where your protein 
-of interest binds to DNA (ChIPseq). The resulting alignments can be used for 
-calling using a program like MACS2/3 (https://github.com/macs3-project/MACS) or 
-HOMER (http://homer.ucsd.edu/homer/ngs/peaks.html). The peaks files are used 
+The overall process in the case of ChIPseq is as follows: DNA is
+cross-linked and the chromatin is fragmented and immunoprecipitated
+using an antibody specific to the transcription factor of interest. The
+DNA captured by the immunoprecipitation is used for library preparation
+and sequencing. In the case of ATACseq, a Tn5 transposase enzyme will
+cut DNA and insert sequencing adapters in open chromatin regions of the
+genome ('tagmentation'). These tagged fragments are sequenced and can be
+used to infer regions of increased chromatin accessibility. The output
+from this process is these raw reads (.fastq or .fq files), which you
+can then align to the appropriate reference genome, where more reads
+will align to areas of open chromatin (ATACseq) or where your protein of
+interest binds to DNA (ChIPseq). The resulting alignments can be used
+for calling using a program like MACS2/3
+(https://github.com/macs3-project/MACS) or HOMER
+(http://homer.ucsd.edu/homer/ngs/peaks.html). The peaks files are used
 in downstream analyses, like differential peak calling and annotation.
 
-![](image/chip_and_atac.png){width="80%"}
+![From
+DOI:10.1007/s11914-023-00808-4](image/chip_and_atac.png){width="80%"}
 
 ## Some more resources:
 
@@ -137,7 +139,7 @@ Park.
 
 The earliest stages of a ChIPseq or ATACseq analysis are similar to
 RNAseq experiments - you start with running QC on your raw reads and
-then aligning them to a reference genome. Instead of a counts matrix, 
+then aligning them to a reference genome. Instead of a counts matrix,
 you mark duplicates in your alignment files (.SAM or .BAM files) using a
 program such as PicardTools. Duplicates are a technical artifact of some
 sequencing technologies, there's a detailed technical blog post here:
@@ -160,8 +162,7 @@ convert between different file types https://genome.ucsc.edu/util.html.
 
 The most common ones are BED, bedgraph, wiggle, and Bigwig. These files
 can be either 0-based (half open) or 1-based (closed). If 0-based, the
-counting starts at 0 and you are counting the spaces between the bases.
-If 1-based, you start counting at 1 and are counting each base (see
+counting starts at 0 and if 1-based, you start counting at 1
 https://hbctraining.github.io/Intro-to-ChIPseq/lectures/Fileformats.pdf
 and
 https://tidyomics.com/blog/2018/12/09/2018-12-09-the-devil-0-and-1-coordinate-system-in-genomics/).
@@ -170,7 +171,7 @@ https://tidyomics.com/blog/2018/12/09/2018-12-09-the-devil-0-and-1-coordinate-sy
 
 ## BED
 
-One way you might see peaks represented is in a `BED` file
+One way you might see peaks represented is in a BED file
 (https://genome.ucsc.edu/FAQ/FAQformat#format1,
 https://grch37.ensembl.org/info/website/upload/bed.html). The BED format
 has 1 row per feature or peak and has 3 required fields that are tab or
@@ -195,7 +196,7 @@ UCSC link. Bed files are not compressed and are 0-based.
 Bedgraph files can be used to visualize tracks in UCSC genome browser or
 IGV (https://genome.ucsc.edu/goldenPath/help/bedgraph.html). It also has
 1 row per feature or gene and is similar to a BED file, but includes a
-4th column where there's a `score` that indicates peak intensity or
+4th column where there's a score that indicates peak intensity or
 coverage. They are not compressed and are 0-based.
 
 ## Wiggle and bigwig files
@@ -203,7 +204,8 @@ coverage. They are not compressed and are 0-based.
 Wiggle and bigwig files are also used to view tracks of peaks in a
 browser. You can read more about wiggle
 (https://genome.ucsc.edu/goldenPath/help/wiggle.html) and bigwig files
-(https://genome.ucsc.edu/goldenPath/help/bigWig.html) here
+(https://genome.ucsc.edu/goldenPath/help/bigWig.html). This reference is
+also helpful
 https://hbctraining.github.io/Intro-to-ChIPseq/lectures/Fileformats.pdf.
 Data in wiggle files must be continuous and broken into equally sized
 elements. Wiggle files get quite large, so I would suggest converting to
@@ -213,22 +215,20 @@ want to use utilities
 BigWig files to view large datasets. Unlike BED and bedgraph, they are
 1-based.
 
-https://hbctraining.github.io/Investigating-chromatin-biology-ChIPseq/lessons/07_handling_peaks_bedtools.html
-
 # DiffBind
 
 DiffBind is an R package for identifying site that are differentially
 bound between sample groups. It is designed to work with alignments and
 lists of enriched loci or peak sets. Peak sets are derived from a peak
 caller and represent sets of genomic intervals or ranges that represent
-potential protein binding sites. Each interval will have a chromosome,
-start and end position, and a score indicating the strength of the peak.
-It includes functions to support the processing of peak sets, including
-overlapping and merging peak sets, counting sequencing reads overlapping
-intervals in peak sets, and identifying statistically significantly
-differentially bound sites based on evidence of binding affinity
-(measured by differences in read densities). To this end it uses
-statistical routines developed in an RNA-Seq context (primarily the
+potential protein binding sites (ChIP). Each interval will have a
+chromosome, start and end position, and a score indicating the strength
+of the peak. It includes functions to support the processing of peak
+sets, including overlapping and merging peak sets, counting sequencing
+reads overlapping intervals in peak sets, and identifying statistically
+significantly differentially bound sites based on evidence of binding
+affinity (measured by differences in read densities). To this end it
+uses statistical routines developed in an RNA-Seq context (primarily the
 Bioconductor packages edgeR and DESeq2). Additionally, the package
 builds on Rgraphics routines to provide a set of standardized plots to
 aid in binding analysis.
@@ -348,15 +348,14 @@ warning.
 Let's load some libraries:
 
 ```{r}
-.libPaths(c( "/usr/local/lib/R/site-library", "/usr/local/lib/R/library","/users/jwalla12/R/x86_64-pc-linux-gnu-library/4.3"    ))
-
-library(DiffBind)
-library(ChIPpeakAnno)
-library(ChIPseeker)
-library(ChIPQC)
-library(magrittr)
-library(tidyr)
-library(ReactomePA)
+#.libPaths(c( "/usr/local/lib/R/site-library", "/usr/local/lib/R/library","/users/jwalla12/R/x86_64-pc-linux-gnu-library/4.3"))
+suppressPackageStartupMessages(library(DiffBind))
+suppressPackageStartupMessages(library(ChIPpeakAnno))
+suppressPackageStartupMessages(library(ChIPseeker))
+suppressPackageStartupMessages(library(ChIPQC))
+suppressPackageStartupMessages(library(magrittr))
+suppressPackageStartupMessages(library(tidyr))
+suppressPackageStartupMessages(library(ReactomePA))
 ```
 
 We will work with the Tamoxifen data that comes with DiffBind. Look at
@@ -505,9 +504,9 @@ has two values, Resistant and Responsive, that have at least three
 replicates each (there are four Resistant sample replicates and seven
 Responsive sample replicates.) This function also establishes the
 default design, which includes only the metadata factor directly
-involved in the contrast (Condition). DiffBind also supports using a 
-design formula, which is discussed in greater detail later in this workshop. 
-That would look like this: 
+involved in the contrast (Condition). DiffBind also supports using a
+design formula, which is discussed in greater detail later in this
+workshop. That would look like this:
 
 ```{r}
 #tamoxifen <- dba.contrast(tamoxifen,design="~ Condition")
@@ -523,7 +522,6 @@ indicate which samples are which:
 #tamoxifen <- dba.contrast(tamoxifen, group1 = resistant, group2=responsive )
 ```
 
-
 ## Performing the differential affinity analysis
 
 Then we run the main differential analysis. If you have already included
@@ -535,75 +533,89 @@ will try to find an appropriate blacklist to use.
 tamoxifen <- dba.analyze(tamoxifen)
 ```
 
-This will run a default DESeq2 statistical analysis (argument `method=DBA_DESEQ2`) as follows:
+This will run a default DESeq2 statistical analysis (argument
+`method=DBA_DESEQ2`) as follows:
 
-First, a matrix of counts is constructed using all the samples in the experiment, with rows
-for each consensus interval, and columns for each sample in the experiment. The raw read
-count is used for this matrix; if the bSubControl parameter is set to TRUE, the raw number
-of reads in the control sample (if available) will be subtracted. And read counts that are less
-than minCount are set to minCount (default is zero). A DESeqDataSet object is then created using 
-DESeq2::DESeqDataSetFromMatrix with the count matrix, metadata from the DBA object, and the design formula.
+First, a matrix of counts is constructed using all the samples in the
+experiment, with rows for each consensus interval, and columns for each
+sample in the experiment. The raw read count is used for this matrix; if
+the bSubControl parameter is set to TRUE, the raw number of reads in the
+control sample (if available) will be subtracted. And read counts that
+are less than minCount are set to minCount (default is zero). A
+DESeqDataSet object is then created using DESeq2::DESeqDataSetFromMatrix
+with the count matrix, metadata from the DBA object, and the design
+formula.
 
-Next the normalization parameters are set for the analysis. If the normalization involves off
-sets, the DESeq2 normalization factors are set to the offsets; if the DBA_NORM_OFFSETs_ADJUST
-is set, the offsets are assumed to be in edgeR format and are run through the edgeR::scaleOffset
-function, adjusted to be mean centered on 1, then normalized to library size. If offsets are not
-used, then DESeq::sizeFactors is called with the scaling factors computed in dba.normalize.
-If these were based on the native RLE method, then the result of a previous call to DE
-Seq2::estimateSizeFactors is used.
+Next the normalization parameters are set for the analysis. If the
+normalization involves off sets, the DESeq2 normalization factors are
+set to the offsets; if the DBA_NORM_OFFSETs_ADJUST is set, the offsets
+are assumed to be in edgeR format and are run through the
+edgeR::scaleOffset function, adjusted to be mean centered on 1, then
+normalized to library size. If offsets are not used, then
+DESeq::sizeFactors is called with the scaling factors computed in
+dba.normalize. If these were based on the native RLE method, then the
+result of a previous call to DE Seq2::estimateSizeFactors is used.
 
-DESeq2::estimateDispersions is then called with the DESeqDataSet object. By default
-the fitType will be set to local; this can be overridden by setting a configuration option
-DBA$config$DESeq2$fitType to the desired value. 
+DESeq2::estimateDispersions is then called with the DESeqDataSet object.
+By default the fitType will be set to local; this can be overridden by
+setting a configuration option DBA$config$DESeq2\$fitType to the desired
+value.
 
-Finally the model is fitted and tested using the DESeq2::nbinomWaldTest, with defaults.
+Finally the model is fitted and tested using the DESeq2::nbinomWaldTest,
+with defaults.
 
-The final results, as a DESeqDataSet object, are accessible by calling dba.analyze() with
-bRetrieveAnalysis=DBA_DESeq2 (or bRetrieveAnalysis=TRUE).
+The final results, as a DESeqDataSet object, are accessible by calling
+dba.analyze() with bRetrieveAnalysis=DBA_DESeq2 (or
+bRetrieveAnalysis=TRUE).
 
-When a contrast is evaluated, the results are obtained by calling DESeq2::results. If the
-contrast was specified to dba.contrast() using a single character string containing the name
-of a specific column coefficient, the call is made with name set to the character string.
-Otherwise, the call is made with contrast set appropriate (either as a vector of three character
-strings representing a design Factor, and two values for that Factor, or a list of one or two
-character strings representing coefficient names, or as a numeric vector of the same length as
-the number of coefficients in the design matrix. Note that coefficient names can be retrieved
-by calling dba.contrast() with bRetrieveCoefficients=TRUE; these are obtained from a call
-to DESeq2::resultsNames.
+When a contrast is evaluated, the results are obtained by calling
+DESeq2::results. If the contrast was specified to dba.contrast() using a
+single character string containing the name of a specific column
+coefficient, the call is made with name set to the character string.
+Otherwise, the call is made with contrast set appropriate (either as a
+vector of three character strings representing a design Factor, and two
+values for that Factor, or a list of one or two character strings
+representing coefficient names, or as a numeric vector of the same
+length as the number of coefficients in the design matrix. Note that
+coefficient names can be retrieved by calling dba.contrast() with
+bRetrieveCoefficients=TRUE; these are obtained from a call to
+DESeq2::resultsNames.
 
-The fold changes used in subsequent reports and plots are the shrunk values estimated from
-the results using DESeq2::lfcShrink.
+The fold changes used in subsequent reports and plots are the shrunk
+values estimated from the results using DESeq2::lfcShrink.
 
 ```{r}
 dba.show(tamoxifen, bContrasts=TRUE)
 
 ```
 
-Displaying the results will show  differentially bound sides (DB) using a default 
-threshold of FDR <= 0.05. 
-
+Displaying the results will show differentially bound sides (DB) using a
+default threshold of FDR \<= 0.05.
 
 ## Retrieving the differentially bound sites
 
 The final step is to retrieve the differentially bound sites. We only
 set a single contrast, so the contrast argument is redundant here but
 would be necessary if you specified different contrasts on the same DBA
-object. We include `th=1` to include all the sites, `bNormalized = TRUE` to get 
-the normalized read counts, `bCounts = TRUE` to report the count data for 
-individual samples, and`bCalled = TRUE` to include information about the number 
-of samples in the group identified as a peak in the original peaksets.
+object. We include `th=1` to include all the sites, `bNormalized = TRUE`
+to get the normalized read counts, `bCounts = TRUE` to report the count
+data for individual samples, and`bCalled = TRUE` to include information
+about the number of samples in the group identified as a peak in the
+original peaksets.
 
 ```{r}
 tamoxifen.DB <- dba.report(tamoxifen, contrast = 1, th = 1, bNormalized = TRUE, bCounts = TRUE, bCalled = TRUE)
 ```
 
-We can also set some parameters to only pull out peaks with significant changes (FDR cut off of .05 with `th = .05`).
+We can also set some parameters to only pull out peaks with significant
+changes (FDR cut off of .05 with `th = .05`).
+
 ```{r}
 tamoxifen.DB.sig <- dba.report(tamoxifen, contrast = 1, th = .05, bNormalized = TRUE, bCounts = TRUE, bCalled = TRUE)
 ```
 
-The results are returned as a GRanges object, but you can convert them to a data frame using `as.data.frame()`.
-
+The results are returned as a GRanges object, but you can convert them
+to a data frame using `as.data.frame()`.
 
 # Plotting in DiffBind
 
@@ -827,7 +839,8 @@ type of central identifier (`eg` for Entrez Gene ids)
 library(org.Hs.eg.db)
 ```
 
-We can use the ChIPseeker package function annotatePeak to determine the structural annotations of the significant peaks.
+We can use the ChIPseeker package function annotatePeak to determine the
+structural annotations of the significant peaks.
 
 ```{r}
 peakAnno <- annotatePeak(peak = tamoxifen.DB.sig, TxDb=txdb, annoDb = 'org.Hs.eg.db', tssRegion=c(-1000, 1000), verbose=FALSE)
@@ -836,10 +849,12 @@ peakAnno_all <- annotatePeak(peak = tamoxifen.DB, TxDb=txdb, annoDb = 'org.Hs.eg
 ```
 
 Can also convert these to data frames to get more information
+
 ```{r}
 peakAnno_df <- as.data.frame(peakAnno)
 peakAnno_all_df <- as.data.frame(peakAnno_all)
 ```
+
 If we convert the peakAnno object to a dataframe, we can see lots of
 additional information. This includes the peak locations, concentration
 of reads in peaks in the Resistant and Responsive condition, statistical
@@ -851,6 +866,10 @@ and the TSS.
 peakAnno_df %>% dplyr::filter(abs(distanceToTSS) <= 5000)
 ```
 
+This information can be particularly useful if you are trying to
+integrate RNAseq and ChIPseq data. It lets you determien if are any of
+your differential peaks associated with genes are differentially
+expressed in your RNAseq experiment.
 
 Then visualize the results as a pie or bar chart:
 
@@ -865,9 +884,20 @@ We can also visualize the distance to TSS
 plotDistToTSS(peakAnno, title="Distribution of transcription factor-binding loci\nrelative to TSS")
 ```
 
-For more information about running enrichment analysis, see the clusterProfiler docs: https://yulab-smu.top/biomedical-knowledge-mining-book/enrichment-overview.html
+For more information about running enrichment analysis, see the
+clusterProfiler docs:
+https://yulab-smu.top/biomedical-knowledge-mining-book/enrichment-overview.html
 
-We can run Over Representation Analysis (section 5.2 in clusterProfiler documentation) on the significant peaks by getting a list of genes associated with significant peaks and then comparing to the universe of all genes associated with peaks. We use the `seq2gene` function from ChIPseeker, which says "ChIPseeker also provides seq2gene, for linking genomic regions to genes in a many-to-many mapping. It consider host gene (exon/intron), promoter region and flanking gene from intergenic region that may under control via cis-regulation. This function is designed to link both coding and non-coding genomic regions to coding genes and facilitate functional analysis."
+We can run Over Representation Analysis (section 5.2 in clusterProfiler
+documentation) on the significant peaks by getting a list of genes
+associated with significant peaks and then comparing to the universe of
+all genes associated with peaks. We use the `seq2gene` function from
+ChIPseeker, which says "ChIPseeker also provides seq2gene, for linking
+genomic regions to genes in a many-to-many mapping. It consider host
+gene (exon/intron), promoter region and flanking gene from intergenic
+region that may under control via cis-regulation. This function is
+designed to link both coding and non-coding genomic regions to coding
+genes and facilitate functional analysis."
 
 ```{r}
 gene <- seq2gene(tamoxifen.DB.sig, tssRegion = c(-5000, 5000), flankDistance = 5000, TxDb=txdb)
@@ -882,15 +912,17 @@ ego <- clusterProfiler::enrichGO(gene = unique(gene),
 dotplot(ego)
 ```
 
-GeneRatio is the ratio of k/n, where k is the overlap between your genes of interest and the genes in the gene module, and n is the total number of unique genes of interest.
+GeneRatio is the ratio of k/n, where k is the overlap between your genes
+of interest and the genes in the gene module, and n is the total number
+of unique genes of interest.
 
-If you want to see more information about which genes are contributing to these results, you can look at the results as a data frame and use dplyr::filter:
+If you want to see more information about which genes are contributing
+to these results, you can look at the results as a data frame and use
+dplyr::filter:
 
 ```{r}
 as.data.frame(ego@result) %>% dplyr::filter(Description == 'plasma membrane')
 ```
-
-
 
 # Introduction to RNAseq: experimental analysis and design
 
@@ -1102,7 +1134,7 @@ suppressPackageStartupMessages(library('pheatmap'))
 suppressPackageStartupMessages(library('RColorBrewer'))
 suppressPackageStartupMessages(library('PoiClaClu'))
 suppressPackageStartupMessages(library('tibble'))
-.libPaths(c("/usr/local/lib/R/site-library", "/usr/local/lib/R/library", "/users/jwalla12/R/x86_64-pc-linux-gnu-library/4.3"  ))
+#.libPaths(c("/usr/local/lib/R/site-library", "/usr/local/lib/R/library", "/users/jwalla12/R/x86_64-pc-linux-gnu-library/4.3"  ))
 suppressPackageStartupMessages(library('apeglm'))
 
 ```
@@ -2720,5 +2752,3 @@ large datasets, especially if doing permutations for gene set enrichment
 analysis, limma with its voom method is far more practical. It is worth
 noting that for large sample sizes, it hardly matters which error model
 you use, owing to the Central Limit Theorem.
-
-
