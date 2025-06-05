@@ -13,7 +13,7 @@ editor:
     drop-down that says '\>\_OSCAR Shell Access'
 3.  Go to your home folder (`cd ~`)
 4.  Git clone the repo
-    (\``git clone https://github.com/compbiocore/ccv_bootcamp_annotations.git`\`)
+    (\``git clone https://github.com/compbiocore/ccv_bootcamp_epigenomics_rnaseq.git`\`)
 5.  Go back to `ood.ccv.brown.edu` and look under `Interactive Apps` in
     the blue menu bar and click on `RStudio on Singularity` under
     `Expert GUIs`.
@@ -22,20 +22,875 @@ Fill in the fields as follows:
 
 -   `Account`: leave blank\
 -   `Partition`: leave blank\
--   `Number of hours`: 24\
--   `Num Cores`: 4\
--   `Memory`: 15\
--   `Singularity Container Path`:/oscar/data/shared/databases/workshops/bootcamp_2024/ngs_counts/ngscounts.sif\
+-   `Number of hours`: 2\
+-   `Num Cores`: 1\
+-   `Memory`: 20\
+-   `Singularity Container Path`:/oscar/data/shared/databases/workshops/bootcamp_2025/ccv_bootcamp_epigenomics_rnaseq/ccv_bootcamp_epigenomics_rnaseq.sif\
 -   `Package install Path`: leave blank\
 -   `Path for R Executable`: \~/scratch\
 -   `R Module`: leave blank\
--   `Additional Data Path`: leave blank 
+-   `Additional Data Path`: /oscar/data/shared/databases/workshops/bootcamp_2025/DiffBind_Vignette
 -   `Reservation`: leave blank\
 
 Once your job starts, click the button to connect to session.\
 At the top of the screen you'll see a menu bar that starts with 'file',
 click on 'file' and 'open file' and open the notebooks/index.qmd file in
 the repo you cloned.\
+
+# Introduction to Epigenomics Data
+
+# Abstract
+
+This portion of the workshop introduces strategies for R processing of DNA data enriched for genomic loci, 
+such as ChIPseq and ATACseq. We will discuss including common file types, 
+importing peaksets, exploratory data analysis and visualizations, data transformations, and statistical
+testing of differential peaks. It uses quotes and materials from [DiffBind: Differential binding analysis of ChIP-Seq peak
+data](https://bioconductor.org/packages/release/bioc/vignettes/DiffBind/inst/doc/DiffBind.pdf)
+by Rory Stark and Gord Brown, and workshops from [Harvard Chan Bioinformatics Core
+(HBC)](https://hbctraining.github.io/Intro-to-ChIPseq/), and [CRUK Cambridge
+Institute](https://bioinformatics-core-shared-training.github.io/cruk-summer-school-2020/).
+
+## Outline
+
+1.  Introduction to Epigenomics Data
+    -   What is Epigenomics?
+    -   Some more resources
+    -   Computational workflow overview
+2.  Standard data types
+    -   BED
+    -   Bedgraph
+    -   Wiggle and bigwig
+3.  DiffBind
+    -   DiffBind Workflow
+    -   Reading in peaks
+    -   Occupancy analysis
+    -   Counting reads
+    -   Normalizing data
+    -   Establishing a model design and contrast
+    -   Performing the differential affinity analysis
+    -   Retreiving the differentially bound sites
+4.  Plotting and reporting in DiffBind
+    -   Venn Diagrams
+    -   PCA plots
+    -   MA plots
+    -   Volcano plots
+    -   Boxplots
+    -   Heatmaps
+    -   Profile plots
+5.  Annotating Peaks and integrating with RNAseq
+
+## What is Epigenomics?
+The central dogma of biology refers to the concept that in general,
+biological information flows from DNA to RNA to proteins, which are the
+molecules that encode for various enzymes etc., that help a living
+organism maintain homeostasis and self-regulate. For this portion of the 
+workshop, we discuss how the transcription from DNA to RNA is regulated. 
+Transcription is a process that is regulated by chromatin accessibility 
+and the binding of transcription factors/histone motifiers. We will focus on 
+methods that could be used to process these types of data, such as ChIPseq or 
+ATACseq data.
+
+The general experimental process involves extracting RNA from your
+different experimental conditions, performing the library preparation
+steps (e.g., cDNA synthesis, fragmentation, and adding adapters). These
+libraries are sequenced on an Illumina FlowCell. The output from this
+process is these raw reads (.fastq or .fq files), which you can then
+align to the appropriate reference genome or transcriptome, where more
+reads will align to more highly expressed genes. This data can be
+processed to get back a counts matrix which will let you look at
+differential expression and perform other downstream analyses.
+
+In the case of ChIPseq, DNA is cross-linked and the chromatin is
+fragmented and immunoprecipitated using an antibody specific to the
+transcription factor of interest. The DNA captured by the
+immunoprecipitation is used for library preparation and sequencing. In
+the case of ATACseq, a Tn5 transposase enzyme will cut DNA and insert
+sequencing adapters in open chromatin regions of the genome
+('tagmentation'). These tagged fragments are sequenced and can be used
+to infer regions of increased chromatin accessibility. The output from this
+process is these raw reads (.fastq or .fq files), which you can then
+align to the appropriate reference genome, where more
+reads will align to areas of open chromatin (ATACseq) or where your protein 
+of interest binds to DNA (ChIPseq). The resulting alignments can be used for 
+calling using a program like MACS2/3 (https://github.com/macs3-project/MACS) or 
+HOMER (http://homer.ucsd.edu/homer/ngs/peaks.html). The peaks files are used 
+in downstream analyses, like differential peak calling and annotation.
+
+![](image/chip_and_atac.png){width="80%"}
+
+## Some more resources:
+
+ENCODE project has guidance for experimental design, data processing,
+and quality standars for ATACseq
+(https://www.encodeproject.org/atac-seq/) and ChIPseq
+(https://www.encodeproject.org/chip-seq/transcription_factor/,
+https://www.encodeproject.org/chip-seq/histone/)/. There's also this
+review article about ATACseq [From reads to insight: a hitchhiker's
+guide to ATAC-seq data
+analysis](https://genomebiology.biomedcentral.com/articles/10.1186/s13059-020-1929-3)
+by Feng Yan, David Powell, David Curtis, and Nicholas Wong; and this
+review article about ChIPseq [ChIP--seq: advantages and challenges of a
+maturing technology](https://www.nature.com/articles/nrg2641) by Peter
+Park.
+
+## Computational workflow overview
+
+The earliest stages of a ChIPseq or ATACseq analysis are similar to
+RNAseq experiments - you start with running QC on your raw reads and
+then aligning them to a reference genome. Instead of a counts matrix, 
+you mark duplicates in your alignment files (.SAM or .BAM files) using a
+program such as PicardTools. Duplicates are a technical artifact of some
+sequencing technologies, there's a detailed technical blog post here:
+https://sequencing.qcfail.com/articles/illumina-patterned-flow-cells-generate-duplicated-sequences/.
+Then you run peak calling to find regions where chromatin is open
+(ATACseq) or a transcription factor has bound (ChIPseq). You can also
+generate bedgraph or bigwig files to manually inspect your alignments in
+IGV or UCSC genome browser. If the duplicate marking and manual
+inspection shows many duplicates (e.g., reads that map to the same exact
+start/stop site in your alignments), you can optionally remove
+duplicates.
+
+![](image/chipseq_workflow.png)
+
+# Standard data types
+
+There are many file formats used to represent and describe features
+(peaks) in your data. UCSC links to a series of tools and utilities to
+convert between different file types https://genome.ucsc.edu/util.html.
+
+The most common ones are BED, bedgraph, wiggle, and Bigwig. These files
+can be either 0-based (half open) or 1-based (closed). If 0-based, the
+counting starts at 0 and you are counting the spaces between the bases.
+If 1-based, you start counting at 1 and are counting each base (see
+https://hbctraining.github.io/Intro-to-ChIPseq/lectures/Fileformats.pdf
+and
+https://tidyomics.com/blog/2018/12/09/2018-12-09-the-devil-0-and-1-coordinate-system-in-genomics/).
+
+![](image/genomic_coordinate.png){width="80%"}
+
+## BED
+
+One way you might see peaks represented is in a `BED` file
+(https://genome.ucsc.edu/FAQ/FAQformat#format1,
+https://grch37.ensembl.org/info/website/upload/bed.html). The BED format
+has 1 row per feature or peak and has 3 required fields that are tab or
+whitespace delimited:
+
+**chrom** - The name of the chromosome (e.g. chr3, chrY, chr2_random) or
+scaffold (e.g. scaffold10671). Many assemblies also support several
+different chromosome aliases (e.g. '1' or 'NC_000001.11' in place of
+'chr1').
+
+**chromStart** - The starting position of the feature in the chromosome
+or scaffold. The first base in a chromosome is numbered 0.
+
+**chromEnd** - The ending position of the feature in the chromosome or
+scaffold.
+
+There are also 9 additional optional fields that are discussed in the
+UCSC link. Bed files are not compressed and are 0-based.
+
+## Bedgraph
+
+Bedgraph files can be used to visualize tracks in UCSC genome browser or
+IGV (https://genome.ucsc.edu/goldenPath/help/bedgraph.html). It also has
+1 row per feature or gene and is similar to a BED file, but includes a
+4th column where there's a `score` that indicates peak intensity or
+coverage. They are not compressed and are 0-based.
+
+## Wiggle and bigwig files
+
+Wiggle and bigwig files are also used to view tracks of peaks in a
+browser. You can read more about wiggle
+(https://genome.ucsc.edu/goldenPath/help/wiggle.html) and bigwig files
+(https://genome.ucsc.edu/goldenPath/help/bigWig.html) here
+https://hbctraining.github.io/Intro-to-ChIPseq/lectures/Fileformats.pdf.
+Data in wiggle files must be continuous and broken into equally sized
+elements. Wiggle files get quite large, so I would suggest converting to
+bigwig. Bigwig is faster than either wiggle or bedgraph, so you might
+want to use utilities
+(https://www.encodeproject.org/software/bedgraphtobigwig/) to make
+BigWig files to view large datasets. Unlike BED and bedgraph, they are
+1-based.
+
+https://hbctraining.github.io/Investigating-chromatin-biology-ChIPseq/lessons/07_handling_peaks_bedtools.html
+
+# DiffBind
+
+DiffBind is an R package for identifying site that are differentially
+bound between sample groups. It is designed to work with alignments and
+lists of enriched loci or peak sets. Peak sets are derived from a peak
+caller and represent sets of genomic intervals or ranges that represent
+potential protein binding sites. Each interval will have a chromosome,
+start and end position, and a score indicating the strength of the peak.
+It includes functions to support the processing of peak sets, including
+overlapping and merging peak sets, counting sequencing reads overlapping
+intervals in peak sets, and identifying statistically significantly
+differentially bound sites based on evidence of binding affinity
+(measured by differences in read densities). To this end it uses
+statistical routines developed in an RNA-Seq context (primarily the
+Bioconductor packages edgeR and DESeq2). Additionally, the package
+builds on Rgraphics routines to provide a set of standardized plots to
+aid in binding analysis.
+
+## DiffBind Workflow
+
+1.  **Reading in peaksets:** The first step is to read in a set of
+    peaksets and associated metadata. Peaksets are derived either from
+    ChIP-Seq peak callers, such as MACS, or using some other criterion
+    (e.g. genomic windows, or all the promoter regions in a genome). The
+    easiest way to read in peaksets is using a comma-separated value
+    (csv) sample sheet with one line for each peakset. (Spreadsheets in
+    Excel® format, with a .xls or .xlsx suffix, are also accepted.) An
+    individual sample can have more than one associated peakset; e.g. if
+    multiple peak callers are used for comparison purposes each sample
+    would have more than one line in the sample sheet.
+
+2.  **Occupancy analysis:** Peaksets, especially those generated by peak
+    callers, provide an insight into the potential occupancy of the
+    protein being ChIPed for at specific genomic loci. After the
+    peaksets have been loaded, it can be useful to perform some
+    exploratory plotting to determine how these occupancy maps agree
+    with each other, e.g. between experimental replicates (re-doing the
+    ChIP under the same conditions), between different peak callers on
+    the same experiment, and within groups of samples representing a
+    common experimental condition. DiffBind provides functions to enable
+    overlaps to be examined, as well as functions to determine how well
+    similar samples cluster together. In addition, peaks may be filtered
+    based on published blacklists of region known to be problematic, as
+    well as custom greylists derived from control track specific to the
+    experiment (see Section 6). Beyond quality control, the product of
+    an occupancy analysis may be a consensus peakset, representing an
+    overall set of candidate binding sites to be used in further
+    analysis.
+
+3.  **Counting reads:** Once a consensus peakset has been derived,
+    DiffBind can use the supplied sequence read files to count how many
+    reads overlap each interval for each unique sample. By default, the
+    peaks in the consensus peakset are re-centered and trimmed based on
+    calculating their summits (point of greatest read overlap) in order
+    to provide more standardized peak intervals. The final result of
+    counting is a binding affinity matrix containing a read count for
+    each sample at every consensus binding site, whether or not it was
+    identified as a peak in that sample. With this matrix, the samples
+    can be re-clustered using affinity, rather than occupancy, data. The
+    binding affinity matrix is used for QC plotting as well as for
+    subsequent differential analysis.
+
+4.  **Differential binding affinity analysis:** The core functionality
+    of DiffBind is the differential binding affinity analysis, which
+    enables binding sites to be identified that are significantly
+    differentially bound between sample groups. This step includes
+    normalizing the experimental data and establishing a model design
+    and a contrast (or contrasts). Next the underlying core analysis
+    routines are executed, by default using DESeq2 . This will assign a
+    p-value and FDR to each candidate binding site indicating confidence
+    that they are differentially bound.
+
+5.  **Plotting and reporting:** Once one or more contrasts have been
+    run, DiffBind provides a number of functions for reporting and
+    plotting the results. MA and volcano plots give an overview of the
+    results of the analysis, while correlation heatmaps and PCA plots
+    show how the groups cluster based on differentially bound sites.
+    Boxplots show the distribution of reads within differentially bound
+    sites corresponding to whether they gain or lose affinity between
+    the two sample groups. A reporting mechanism enables differentially
+    bound sites to be extracted for further processing, such as
+    annotation, motif, and pathway analyses.
+
+## Reading in Peaks
+
+We will use a sample sheet to process our data. Columns names in sample
+sheet may include:
+
+1.  SampleID: Identifier string for sample. Must be unique for each
+    sample.
+2.  Tissue: Identifier string for tissue type
+3.  Factor: Identifier string for factor
+4.  Condition: Identifier string for condition
+5.  Treatment: Identifier string for treatment
+6.  Replicate: Replicate number of sample
+7.  bamReads: file path for bam file containing aligned reads for ChIP
+    sample
+8.  bamControl: file path for bam file containing aligned reads for
+    control sample
+9.  Spikein: file path for bam file containing aligned spike-in reads
+10. ControlID: Identifier string for control sample
+11. Peaks: path for file containing peaks for sample. Format determined
+    by PeakCaller field or caller parameter
+12. PeakCaller: Identifier string for peak caller used. If Peaks is not
+    a bed file, this will determine how the Peaks file is parsed. If
+    missing, will use default peak caller specified in caller parameter.
+    Possible values:
+
+-   "raw": text file file; peak score is in fourth column
+-   "bed": .bed file; peak score is in fifth column
+-   "narrow": default peak.format: narrowPeaks file
+-   "macs": MACS .xls file
+-   "swembl": SWEMBL .peaks file
+-   "bayes": bayesPeak file
+-   "peakset": peakset written out using pv.writepeakset
+-   "fp4": FindPeaks v4
+
+13. PeakFormat: string indicating format for peak files; see PeakCaller
+    and dba.peakset
+14. ScoreCol: column in peak files that contains peak scores
+15. LowerBetter: logical indicating that lower scores signify better
+    peaks
+16. Counts: file path for externally computed read counts
+
+For sample sheets loaded from a file, the accepted formats are
+comma-separated values (column headers, followed by one line per
+sample), or Excel-formatted spreadsheets (.xls or .xlsx extension).
+Leading and trailing white space will be removed from all values, with a
+warning.
+
+Let's load some libraries:
+
+```{r}
+.libPaths(c( "/usr/local/lib/R/site-library", "/usr/local/lib/R/library","/users/jwalla12/R/x86_64-pc-linux-gnu-library/4.3"    ))
+
+library(DiffBind)
+library(ChIPpeakAnno)
+library(ChIPseeker)
+library(ChIPQC)
+library(magrittr)
+library(tidyr)
+library(ReactomePA)
+```
+
+We will work with the Tamoxifen data that comes with DiffBind. Look at
+the sample sheet
+
+```{r}
+samples <- read.csv("/oscar/data/shared/databases/workshops/bootcamp_2025/DiffBind_Vignette/tamoxifen.csv")
+head(samples)
+```
+
+Read in the peakset as a DBA object:
+
+```{r}
+tamoxifen <- dba(sampleSheet=samples)
+tamoxifen
+```
+
+Using the data from the peak calls, a correlation heatmap can be
+generated which gives an initial clustering of the samples using the
+cross-correlations of each row of the binding matrix:
+
+```{r}
+plot(tamoxifen)
+```
+
+## Counting reads
+
+The next step is to calculate a binding matrix with scores based on read
+counts for every sample (affinity scores), rather than confidence scores
+for only those peaks called in a specific sample (occupancy scores).
+
+```{r}
+tamoxifen <- dba.count(tamoxifen)
+```
+
+```{r}
+tamoxifen
+```
+
+This shows that all the samples are using the same, approximately 2800
+site consensus peakset. Also, two new columns have been added. The first
+(Reads) shows the total number of aligned reads for each sample (the
+"Full" library sizes). The second is labeled FRiP, which stands for
+Fraction of Reads in Peaks. This is the proportion of reads for that
+sample that overlap a peak in the consensus peakset, and can be used to
+indicate which samples show more enrichment overall. For each sample,
+multiplying the value in the Reads column by the corresponding FRiP
+value will yield the number of reads that overlap a consensus peak. This
+can be done using the dba.show function:
+
+```{r}
+info <- dba.show(tamoxifen)
+libsizes <- cbind(LibReads=info$Reads, FRiP=info$FRiP,PeakReads=round(info$Reads * info$FRiP))
+rownames(libsizes) <- info$ID
+libsizes
+```
+
+We can also plot a new correlation heatmap based on the count scores.
+While this shows a slightly different clustering, with overall higher
+levels of correlation (due to using normalized read counts instead of
+whether or not a peak was called), responsiveness to tamoxifen treatment
+does not appear to form a basis for clustering when using all of the
+affinity scores.
+
+```{r}
+plot(tamoxifen)
+```
+
+## Blacklists
+
+You can optionally include a specific blacklist at this point. The
+difference between blacklists and greylists:
+
+-   Blacklists are pre-defined lists of regions specific to a reference
+    genome that are known to be problematic. The best known lists have
+    been identified as part of the ENCODE project and are available for
+    a variety of reference genomes and genome versions. The current
+    ENCODE blacklists are available through the dba.blacklist function.
+
+-   Greylists are specific to a ChIP-seq experiment, and are derived
+    from the controls generated as part of the experiment. The idea is
+    to analyze libraries that are not meant to show systematic
+    enrichment (such as Inputs, in which no anti-body is introduced),
+    and identify anomalous regions where a disproportionate degree of
+    signal is present. These regions can then be excluded from
+    subsequent analysis.
+
+DiffBind has several blacklists included (which we use later), but you
+can also use your own as long as you convert them to a GRanges object.
+We aren't including a blacklist here, but if we did it might look like
+this:
+
+```{r}
+#tamoxifen <- dba.blacklist(tamoxifen, blacklist=custom_blacklist)
+```
+
+You can even remove blacklists from your bam files before running peak
+calling using bedtools intersect (see
+https://bedtools.readthedocs.io/en/latest/content/tools/intersect.html):
+
+`bedtools intersect -v -abam yourbam -b blacklist.bed > filtered.bam`
+
+## Normalizing data
+
+Next is normalization. By default, the data are normalized based on
+sequencing depth. The DiffBind documentation has a detailed section on
+different normalization options, including suggestions for normalization
+methods for non-ChIPseq data (for example, with background normalization
+for ATACseq or with spike-in controls for cut&run).
+(https://bioconductor.org/packages/release/bioc/vignettes/DiffBind/inst/doc/DiffBind.pdf#section.7)
+
+```{r}
+tamoxifen <- dba.normalize(tamoxifen)
+```
+
+Look at the details of the normalization:
+
+```{r}
+norm <- dba.normalize(tamoxifen, bRetrieve=TRUE)
+norm
+```
+
+This shows the normalization method used (lib), the calculated
+normalization factors for each sample, and the full library sizes (which
+include the total number of reads in the associated .bam files).
+
+## Establishing a model design and contrast
+
+Before running the differential analysis, we need to tell DiffBind how
+to model the data, including which comparison(s) we are interested in.
+This is done using the dba.contrast function, as follows:
+
+```{r}
+tamoxifen <- dba.contrast(tamoxifen, reorderMeta=list(Condition="Responsive"))
+```
+
+This call will set up any "default" contrasts by examining the project
+metadata factors and assuming we want to look at the differences between
+any two sample groups with at least three replicates in each side of the
+comparison (that is, any factor that has two different values where
+there are at least three samples that share each value.) It also
+establishes the Responsive condition as the baseline, so it will be in
+the denominator of the default contrast. In the current case, there is
+only one such comparison that qualifies: The Condition metadata factor
+has two values, Resistant and Responsive, that have at least three
+replicates each (there are four Resistant sample replicates and seven
+Responsive sample replicates.) This function also establishes the
+default design, which includes only the metadata factor directly
+involved in the contrast (Condition). DiffBind also supports using a 
+design formula, which is discussed in greater detail later in this workshop. 
+That would look like this: 
+
+```{r}
+#tamoxifen <- dba.contrast(tamoxifen,design="~ Condition")
+```
+
+In situations where you don't have replicates (not recommended), of if
+you want to compare specific groups, you will have to create masks to
+indicate which samples are which:
+
+```{r}
+#resistant<- dba.mask(tamoxifen, DBA_CONDITION, "Resistant")
+#responsive <- dba.mask(tamoxifen, DBA_CONDITION, "Responsive")
+#tamoxifen <- dba.contrast(tamoxifen, group1 = resistant, group2=responsive )
+```
+
+
+## Performing the differential affinity analysis
+
+Then we run the main differential analysis. If you have already included
+a blacklist or a greylist earlier in the analysis, you can use the
+arguments `bBlacklist=FALSE` or `bGreylist=FALSE`, otherwise DiffBind
+will try to find an appropriate blacklist to use.
+
+```{r}
+tamoxifen <- dba.analyze(tamoxifen)
+```
+
+This will run a default DESeq2 statistical analysis (argument `method=DBA_DESEQ2`) as follows:
+
+First, a matrix of counts is constructed using all the samples in the experiment, with rows
+for each consensus interval, and columns for each sample in the experiment. The raw read
+count is used for this matrix; if the bSubControl parameter is set to TRUE, the raw number
+of reads in the control sample (if available) will be subtracted. And read counts that are less
+than minCount are set to minCount (default is zero). A DESeqDataSet object is then created using 
+DESeq2::DESeqDataSetFromMatrix with the count matrix, metadata from the DBA object, and the design formula.
+
+Next the normalization parameters are set for the analysis. If the normalization involves off
+sets, the DESeq2 normalization factors are set to the offsets; if the DBA_NORM_OFFSETs_ADJUST
+is set, the offsets are assumed to be in edgeR format and are run through the edgeR::scaleOffset
+function, adjusted to be mean centered on 1, then normalized to library size. If offsets are not
+used, then DESeq::sizeFactors is called with the scaling factors computed in dba.normalize.
+If these were based on the native RLE method, then the result of a previous call to DE
+Seq2::estimateSizeFactors is used.
+
+DESeq2::estimateDispersions is then called with the DESeqDataSet object. By default
+the fitType will be set to local; this can be overridden by setting a configuration option
+DBA$config$DESeq2$fitType to the desired value. 
+
+Finally the model is fitted and tested using the DESeq2::nbinomWaldTest, with defaults.
+
+The final results, as a DESeqDataSet object, are accessible by calling dba.analyze() with
+bRetrieveAnalysis=DBA_DESeq2 (or bRetrieveAnalysis=TRUE).
+
+When a contrast is evaluated, the results are obtained by calling DESeq2::results. If the
+contrast was specified to dba.contrast() using a single character string containing the name
+of a specific column coefficient, the call is made with name set to the character string.
+Otherwise, the call is made with contrast set appropriate (either as a vector of three character
+strings representing a design Factor, and two values for that Factor, or a list of one or two
+character strings representing coefficient names, or as a numeric vector of the same length as
+the number of coefficients in the design matrix. Note that coefficient names can be retrieved
+by calling dba.contrast() with bRetrieveCoefficients=TRUE; these are obtained from a call
+to DESeq2::resultsNames.
+
+The fold changes used in subsequent reports and plots are the shrunk values estimated from
+the results using DESeq2::lfcShrink.
+
+```{r}
+dba.show(tamoxifen, bContrasts=TRUE)
+
+```
+
+Displaying the results will show  differentially bound sides (DB) using a default 
+threshold of FDR <= 0.05. 
+
+
+## Retrieving the differentially bound sites
+
+The final step is to retrieve the differentially bound sites. We only
+set a single contrast, so the contrast argument is redundant here but
+would be necessary if you specified different contrasts on the same DBA
+object. We include `th=1` to include all the sites, `bNormalized = TRUE` to get 
+the normalized read counts, `bCounts = TRUE` to report the count data for 
+individual samples, and`bCalled = TRUE` to include information about the number 
+of samples in the group identified as a peak in the original peaksets.
+
+```{r}
+tamoxifen.DB <- dba.report(tamoxifen, contrast = 1, th = 1, bNormalized = TRUE, bCounts = TRUE, bCalled = TRUE)
+```
+
+We can also set some parameters to only pull out peaks with significant changes (FDR cut off of .05 with `th = .05`).
+```{r}
+tamoxifen.DB.sig <- dba.report(tamoxifen, contrast = 1, th = .05, bNormalized = TRUE, bCounts = TRUE, bCalled = TRUE)
+```
+
+The results are returned as a GRanges object, but you can convert them to a data frame using `as.data.frame()`.
+
+
+# Plotting in DiffBind
+
+Besides the correlation heatmaps we have been looking at, a number of
+other plots are available using the affinity data. This section covers
+Venn diagrams, MA plots, Volcano plots, PCA plots, Boxplots, and
+Heatmaps.
+
+## Venn diagrams
+
+Venn diagrams illustrate overlaps between different sets of peaks. For
+example, amongst the differentially bound sites, we can see the
+differences between the "Gain" sites (those that increase binding
+enrichment in the Resistant condition) and the "Loss" sites (those with
+lower enrichment) as follows:
+
+```{r}
+dba.plotVenn(tamoxifen, contrast=1, bDB=TRUE,bGain=TRUE, bLoss=TRUE, bAll=FALSE)
+```
+
+## PCA plots
+
+While the correlation heatmaps already seen are good for showing
+clustering, plots based on principal components analysis can be used to
+give a deeper insight into how samples are associated.
+
+```{r}
+dba.plotPCA(tamoxifen,DBA_TISSUE,label=DBA_CONDITION)
+```
+
+## MA plots
+
+MA plots are a useful way to visualize the relationship between the
+overall binding level at each site and the magnitude of the change in
+binding enrichment between conditions, as well as the effect of
+normalization on data. An MA plot can be obtained for the Resistant vs
+Responsive contrast as follows:
+
+```{r}
+dba.plotMA(tamoxifen, contrast = 1)
+```
+
+Each point represents a binding site, with the points in magenta
+representing sites identified as differentially bound. There is a blue
+horizontal line through the origin (0 LFC), as well as a horizontal red
+curve representing a non-linear loess fit showing the underlying
+relationship between coverage levels and fold changes. The plot shows
+how the differentially bound sites appear to have a minimum absolute log
+fold difference of somewhere between one and two. As we have already
+seen, it also shows that more ERa binding sites lose binding affinity in
+the tamoxifen resistant condition than gain binding affinity, as
+evidenced by more red dots below the center line than are above it. This
+same data can also be shown with the concentrations of each sample
+groups plotted against each other plot using dba.plotMA(tamoxifen,
+bXY=TRUE)
+
+## Volcano plots
+
+Similar to MA plots, Volcano plots also highlight significantly
+differentially bound sites and show their fold changes. Here, however,
+the confidence statistic (FDR or p-value) is shown on a negative log
+scale, helping visualize the relationship between the magnitude of fold
+changes and the confidence that sites are differentially bound.
+
+```{r}
+dba.plotVolcano(tamoxifen)
+```
+
+Volcano plot of Resistant-Responsive contrast. Sites identified as
+significantly differentially bound shown in red.
+
+## Boxplots
+
+Boxplots provide a way to view how read distributions differ between
+classes of binding sites. Consider the example, where 311 differentially
+bound sites are identified. The MA plot shows that these are not
+distributed evenly between those that increase binding affinity in the
+Responsive group vs. those that increase binding affinity in the
+Resistant groups. This can be seen quantitatively using the sites
+returned in the report:
+
+```{r}
+sum(tamoxifen.DB$Fold<0)
+sum(tamoxifen.DB$Fold>0)
+```
+
+But how are reads distributed amongst the different classes of
+differentially bound sites and sample groups? These data can be more
+clearly seen using a boxplot:
+
+```{r}
+dba.plotBox(tamoxifen)
+```
+
+Box plots of read distributions for significantly differentially bound
+(DB) sites. Tamoxifen Resis- tant samples are shown in blue, and
+Responsive samples are shown in red. Left two boxes show distribution of
+reads over all DB sites in the Resistant and Responsive groups; middle
+two boxes show distributions of reads in DB sites that increase in
+affinity in the Resistant group; last two boxes show distributions of
+reads in DB sites that increase in affinity in the Responsive group.
+
+## Heatmaps
+
+DiffBind provides two types of heatmaps. This first, correlation
+heatmaps, we have already seen:
+
+```{r}
+dba.plotHeatmap(tamoxifen)
+```
+
+Another way to view the patterns of binding affinity directly in the
+differentially bound sites is via a binding affinity heatmap, showing
+the read scores for some or all of the binding sites. This can be
+plotted for the example case as follows
+
+```{r}
+hmap <- colorRampPalette(c("#fc8d59", "#ffffbf", "#91bfdb"))(n = 13)
+dba.plotHeatmap(tamoxifen, contrast=1, correlations=FALSE, scale="row", colScheme = hmap)
+```
+
+The heatmap shows the affinities and clustering of the differentially
+bound sites (rows), as well as the sample clustering (columns). In this
+case, the (normalized) counts have been row scaled, and a
+colorblind-safe heatmap color palette applied
+
+## Profile plots
+
+The dba.plotProfile() function enables the computation of peakset
+profiles and the plot- ting of complex heatmaps. It serves as a
+front-end to enable experiments analyzed using DiffBind to more easily
+use the profiling and plotting functionality provided by the profileplyr
+package written by Tom Carroll and Doug Barrows (see
+https://bioconductor.org/packages/ release/bioc/html/profileplyr.html).
+
+Processing proceeds in two phases.
+
+In the first phase, specific peaksets are extracted from a DiffBind DBA
+object and profiles are calculated for these peaks for set of samples in
+the DiffBind experiment. Profiles are calculated by counting the number
+of overlapping reads in a series of bins upstream and downstream of each
+peak center.
+
+In the second phase, the derived profiles are plotted in a series of
+complex heatmaps showing the relative intensity of overlapping peaks in
+each bin for each peak in each sample, along with summary plots showing
+the average profile across the sites for each sample. Due to the
+computational cost of this function, it is advised that the calculation
+of profiles and the plotting be separated into two calls, so that the
+profiles do not need to be re- generated if something goes wrong in the
+plotting.
+
+By default, when a DBA object is passed in to generate profiles,
+plotting is turned off and a profileplyr object is returned. When
+dba.plotProfile() is called with a profileplyr object, a plot is
+generated by default. The main aspects of the profile plot are which
+samples are plotted (the X-axis) and which sites are plotted (the
+Y-axis). These can be specified in a number of flexible ways. Other pa-
+rameters to dba.plotProfile() determine how the data are treated,
+controlling aspects such as how many sites are included in the plot,
+data normalization, sample merging (computing mean profiles for groups
+of samples), and control over the appearance of the plot.
+
+See section 4.7 of the DiffBind docs for more details:
+https://bioconductor.org/packages/release/bioc/vignettes/DiffBind/inst/doc/DiffBind.pdf
+
+```{r}
+profiles <- dba.plotProfile(tamoxifen)
+dba.plotProfile(profiles)
+```
+
+If an analysis has been completed, the default plot will be based on the
+results of the first contrast. If the contrast compares two conditions,
+all of the samples in each condition will be included, with the heatmaps
+colored separately for samples in each contrast condition.
+
+Sample groups are merged based on the DBA_REPLICATE attribute, such that
+each sample class will have one heatmap based on the normalized mean
+read counts for all the samples in that class that have the same
+metadata except for the Replicate number
+
+In terms of sites, two groups of differentially bound sites are
+included: Gain sites (with positive fold change) and Loss sites
+(negative fold change). If there are more than 1,000 sites in either
+category, the 1,000 sites with the great absolute value fold change will
+be included (the maximum number of sites to be profiled can be altered).
+
+This plot shows how the differentially bound sites are divided into Gain
+and Loss groups, and how sample groups belonging to each of the two
+contrast conditions (Resistant and Responsive) result in differently
+colored heatmaps.
+
+## Peak annotation with ChIPseeker
+
+Now that we have a list of differential peaks, we might want to put our
+peaks into context by determining their location on the genome relative
+to genes or other features. We will use ChIPseeker, but you could also
+use ChIPpeakAnno
+(https://www.bioconductor.org/packages/release/bioc/html/ChIPpeakAnno.html)
+or ChIPQC
+(https://www.bioconductor.org/packages/release/bioc/html/ChIPQC.html).
+
+A TxDb object connects a set of genomic coordinates to
+transcript-oriented features. It also contains feature IDs for
+transcripts and genes so TxDb objects can be used to link gene IDs and
+transcript IDs.
+
+```{r}
+library(TxDb.Hsapiens.UCSC.hg19.knownGene)
+txdb <- TxDb.Hsapiens.UCSC.hg19.knownGene
+```
+
+An OrgDb is an organism-specific, genome wide annotation. We can use it
+to map between different gene ID types using a central identifier
+(usually Entrez gene ID). OrgDb names are always of the form:
+org.Ab.id.db (e.g. org.Sc.sgd.db) where Ab is a 2-letter abbreviation of
+the organism and id is an abbreviation (in lower-case) describing the
+type of central identifier (`eg` for Entrez Gene ids)
+
+```{r}
+library(org.Hs.eg.db)
+```
+
+We can use the ChIPseeker package function annotatePeak to determine the structural annotations of the significant peaks.
+
+```{r}
+peakAnno <- annotatePeak(peak = tamoxifen.DB.sig, TxDb=txdb, annoDb = 'org.Hs.eg.db', tssRegion=c(-1000, 1000), verbose=FALSE)
+peakAnno_all <- annotatePeak(peak = tamoxifen.DB, TxDb=txdb, annoDb = 'org.Hs.eg.db', tssRegion=c(-1000, 1000), verbose=FALSE)
+
+```
+
+Can also convert these to data frames to get more information
+```{r}
+peakAnno_df <- as.data.frame(peakAnno)
+peakAnno_all_df <- as.data.frame(peakAnno_all)
+```
+If we convert the peakAnno object to a dataframe, we can see lots of
+additional information. This includes the peak locations, concentration
+of reads in peaks in the Resistant and Responsive condition, statistical
+information, information about the peak structural annotation, and
+information about the nearest gene TSS and the distance between the peak
+and the TSS.
+
+```{r}
+peakAnno_df %>% dplyr::filter(abs(distanceToTSS) <= 5000)
+```
+
+
+Then visualize the results as a pie or bar chart:
+
+```{r}
+plotAnnoBar(peakAnno)
+plotAnnoPie(peakAnno)
+```
+
+We can also visualize the distance to TSS
+
+```{r}
+plotDistToTSS(peakAnno, title="Distribution of transcription factor-binding loci\nrelative to TSS")
+```
+
+For more information about running enrichment analysis, see the clusterProfiler docs: https://yulab-smu.top/biomedical-knowledge-mining-book/enrichment-overview.html
+
+We can run Over Representation Analysis (section 5.2 in clusterProfiler documentation) on the significant peaks by getting a list of genes associated with significant peaks and then comparing to the universe of all genes associated with peaks. We use the `seq2gene` function from ChIPseeker, which says "ChIPseeker also provides seq2gene, for linking genomic regions to genes in a many-to-many mapping. It consider host gene (exon/intron), promoter region and flanking gene from intergenic region that may under control via cis-regulation. This function is designed to link both coding and non-coding genomic regions to coding genes and facilitate functional analysis."
+
+```{r}
+gene <- seq2gene(tamoxifen.DB.sig, tssRegion = c(-5000, 5000), flankDistance = 5000, TxDb=txdb)
+
+ego <- clusterProfiler::enrichGO(gene = unique(gene),
+                universe = unique(peakAnno_all_df$geneId),
+                OrgDb = org.Hs.eg.db,
+                ont = "CC",
+                pAdjustMethod = "BH",
+                readable = TRUE)
+
+dotplot(ego)
+```
+
+GeneRatio is the ratio of k/n, where k is the overlap between your genes of interest and the genes in the gene module, and n is the total number of unique genes of interest.
+
+If you want to see more information about which genes are contributing to these results, you can look at the results as a data frame and use dplyr::filter:
+
+```{r}
+as.data.frame(ego@result) %>% dplyr::filter(Description == 'plasma membrane')
+```
+
+
 
 # Introduction to RNAseq: experimental analysis and design
 
@@ -230,7 +1085,11 @@ Load the `airway`, `SummarizedExperiment`, and other packages we will
 need.
 
 ```{r}
-.libPaths(c("/usr/local/lib/R/site-library", "/usr/local/lib/R/library", "/users/jwalla12/R/x86_64-pc-linux-gnu-library/4.3" ))
+#.libPaths(c("/usr/local/lib/R/site-library", "/usr/local/lib/R/library", "/users/jwalla12/R/x86_64-pc-linux-gnu-library/4.3" ))
+.libPaths(c("/usr/local/lib/R/site-library", "/usr/local/lib/R/library"  ))
+#.libPaths(c("/usr/local/lib/R/site-library", "/usr/local/lib/R/library", "/users/jwalla12/R/x86_64-pc-linux-gnu-library/4.3" ))
+
+#suppressPackageStartupMessages(library('matrixStats'))
 suppressPackageStartupMessages(library('airway'))
 suppressPackageStartupMessages(library('SummarizedExperiment'))
 suppressPackageStartupMessages(library('DESeq2'))
@@ -243,6 +1102,9 @@ suppressPackageStartupMessages(library('pheatmap'))
 suppressPackageStartupMessages(library('RColorBrewer'))
 suppressPackageStartupMessages(library('PoiClaClu'))
 suppressPackageStartupMessages(library('tibble'))
+.libPaths(c("/usr/local/lib/R/site-library", "/usr/local/lib/R/library", "/users/jwalla12/R/x86_64-pc-linux-gnu-library/4.3"  ))
+suppressPackageStartupMessages(library('apeglm'))
+
 ```
 
 For the purposes of this tutorial, we will be using the `airway` data.
@@ -1859,767 +2721,4 @@ analysis, limma with its voom method is far more practical. It is worth
 noting that for large sample sizes, it hardly matters which error model
 you use, owing to the Central Limit Theorem.
 
-# Introduction to Epigenomics Data
 
-# Abstract
-
-This portion of the workshop introduces ChIPseq and ATACseq analysis
-using R, including common file types, importing peaksets, exploratory
-data analysis and visualizations, data transformations, and statistical
-testing of differential peaks. It uses quotes and materials from
-[DiffBind: Differential binding analysis of ChIP-Seq peak
-data](https://bioconductor.org/packages/release/bioc/vignettes/DiffBind/inst/doc/DiffBind.pdf)
-by Rory Stark and Gord Brown, and workshops from [Harvard Chan
-Bioinformatics Core
-(HBC)](https://hbctraining.github.io/Intro-to-ChIPseq/), and [CRUK
-Cambridge
-Institute](https://bioinformatics-core-shared-training.github.io/cruk-summer-school-2020/).
-
-## Outline
-
-1.  Introduction to Epigenomics Data
-    -   What is Epigenomics?
-    -   Some more resources
-    -   Computational workflow overview
-2.  Standard data types
-    -   BED
-    -   Bedgraph
-    -   Wiggle and bigwig
-3.  DiffBind
-    -   DiffBind Workflow
-    -   Reading in peaks
-    -   Occupancy analysis
-    -   Counting reads
-    -   Normalizing data
-    -   Establishing a model design and contrast
-    -   Performing the differential affinity analysis
-    -   Retreiving the differentially bound sites
-4.  Plotting and reporting in DiffBind
-    -   Venn Diagrams
-    -   PCA plots
-    -   MA plots
-    -   Volcano plots
-    -   Boxplots
-    -   Heatmaps
-    -   Profile plots
-5.  Annotating Peaks and integrating with RNAseq
-
-## What is Epigenomics?
-
-In the previous section of this workshop, we discussed working with
-transcriptome or RNAseq data. Transcription is a process that is
-regulated by chromatin accessibility and the binding of transcription
-factors/histone motifiers. We will focus on methods that could be used
-to process these types of data, such as ChIPseq or ATACseq data.
-
-In the case of ChIPseq, DNA is cross-linked and the chromatin is
-fragmented and immunoprecipitated using an antibody specific to the
-transcription factor of interest. The DNA captured by the
-immunoprecipitation is used for library preparation and sequencing. In
-the case of ATACseq, a Tn5 transposase enzyme will cut DNA and insert
-sequencing adapters in open chromatin regions of the genome
-('tagmentation'). These tagged fragments are sequenced and can be used
-to infer regions of increased chromatin accessibility.
-
-![](image/chip_and_atac.png){width="80%"}
-
-## Some more resources:
-
-ENCODE project has guidance for experimental design, data processing,
-and quality standars for ATACseq
-(https://www.encodeproject.org/atac-seq/) and ChIPseq
-(https://www.encodeproject.org/chip-seq/transcription_factor/,
-https://www.encodeproject.org/chip-seq/histone/)/. There's also this
-review article about ATACseq [From reads to insight: a hitchhiker's
-guide to ATAC-seq data
-analysis](https://genomebiology.biomedcentral.com/articles/10.1186/s13059-020-1929-3)
-by Feng Yan, David Powell, David Curtis, and Nicholas Wong; and this
-review article about ChIPseq [ChIP--seq: advantages and challenges of a
-maturing technology](https://www.nature.com/articles/nrg2641) by Peter
-Park.
-
-## Computational workflow overview
-
-The earliest stages of a ChIPseq or ATACseq analysis are similar to
-RNAseq experiments - you start with running QC on your raw reads and
-then aligning them to a reference genome. Instead of a counts matrix,
-you mark duplicates in your alignment files (.SAM or .BAM files) using a
-program such as PicardTools. Duplicates are a technical artifact of some
-sequencing technologies, there's a detailed technical blog post here:
-https://sequencing.qcfail.com/articles/illumina-patterned-flow-cells-generate-duplicated-sequences/.
-Then you run peak calling to find regions where chromatin is open
-(ATACseq) or a transcription factor has bound (ChIPseq). You can also
-generate bedgraph or bigwig files to manually inspect your alignments in
-IGV or UCSC genome browser. If the duplicate marking and manual
-inspection shows many duplicates (e.g., reads that map to the same exact
-start/stop site in your alignments), you can optionally remove
-duplicates.
-
-![](image/chipseq_workflow.png)
-
-# Standard data types
-
-There are many file formats used to represent and describe features
-(peaks) in your data. UCSC links to a series of tools and utilities to
-convert between different file types https://genome.ucsc.edu/util.html.
-
-The most common ones are BED, bedgraph, wiggle, and Bigwig. These files
-can be either 0-based (half open) or 1-based (closed). If 0-based, the
-counting starts at 0 and you are counting the spaces between the bases.
-If 1-based, you start counting at 1 and are counting each base (see
-https://hbctraining.github.io/Intro-to-ChIPseq/lectures/Fileformats.pdf
-and
-https://tidyomics.com/blog/2018/12/09/2018-12-09-the-devil-0-and-1-coordinate-system-in-genomics/).
-
-![](image/genomic_coordinate.png){width="80%"}
-
-## BED
-
-One way you might see peaks represented is in a `BED` file
-(https://genome.ucsc.edu/FAQ/FAQformat#format1,
-https://grch37.ensembl.org/info/website/upload/bed.html). The BED format
-has 1 row per feature or peak and has 3 required fields that are tab or
-whitespace delimited:
-
-**chrom** - The name of the chromosome (e.g. chr3, chrY, chr2_random) or
-scaffold (e.g. scaffold10671). Many assemblies also support several
-different chromosome aliases (e.g. '1' or 'NC_000001.11' in place of
-'chr1').
-
-**chromStart** - The starting position of the feature in the chromosome
-or scaffold. The first base in a chromosome is numbered 0.
-
-**chromEnd** - The ending position of the feature in the chromosome or
-scaffold.
-
-There are also 9 additional optional fields that are discussed in the
-UCSC link. Bed files are not compressed and are 0-based.
-
-## Bedgraph
-
-Bedgraph files can be used to visualize tracks in UCSC genome browser or
-IGV (https://genome.ucsc.edu/goldenPath/help/bedgraph.html). It also has
-1 row per feature or gene and is similar to a BED file, but includes a
-4th column where there's a `score` that indicates peak intensity or
-coverage. They are not compressed and are 0-based.
-
-## Wiggle and bigwig files
-
-Wiggle and bigwig files are also used to view tracks of peaks in a
-browser. You can read more about wiggle
-(https://genome.ucsc.edu/goldenPath/help/wiggle.html) and bigwig files
-(https://genome.ucsc.edu/goldenPath/help/bigWig.html) here
-https://hbctraining.github.io/Intro-to-ChIPseq/lectures/Fileformats.pdf.
-Data in wiggle files must be continuous and broken into equally sized
-elements. Wiggle files get quite large, so I would suggest converting to
-bigwig. Bigwig is faster than either wiggle or bedgraph, so you might
-want to use utilities
-(https://www.encodeproject.org/software/bedgraphtobigwig/) to make
-BigWig files to view large datasets. Unlike BED and bedgraph, they are
-1-based.
-
-https://hbctraining.github.io/Investigating-chromatin-biology-ChIPseq/lessons/07_handling_peaks_bedtools.html
-
-# DiffBind
-
-DiffBind is an R package for identifying site that are differentially
-bound between sample groups. It is designed to work with alignments and
-lists of enriched loci or peak sets. Peak sets are derived from a peak
-caller and represent sets of genomic intervals or ranges that represent
-potential protein binding sites. Each interval will have a chromosome,
-start and end position, and a score indicating the strength of the peak.
-It includes functions to support the processing of peak sets, including
-overlapping and merging peak sets, counting sequencing reads overlapping
-intervals in peak sets, and identifying statistically significantly
-differentially bound sites based on evidence of binding affinity
-(measured by differences in read densities). To this end it uses
-statistical routines developed in an RNA-Seq context (primarily the
-Bioconductor packages edgeR and DESeq2). Additionally, the package
-builds on Rgraphics routines to provide a set of standardized plots to
-aid in binding analysis.
-
-## DiffBind Workflow
-
-1.  **Reading in peaksets:** The first step is to read in a set of
-    peaksets and associated metadata. Peaksets are derived either from
-    ChIP-Seq peak callers, such as MACS, or using some other criterion
-    (e.g. genomic windows, or all the promoter regions in a genome). The
-    easiest way to read in peaksets is using a comma-separated value
-    (csv) sample sheet with one line for each peakset. (Spreadsheets in
-    Excel® format, with a .xls or .xlsx suffix, are also accepted.) An
-    individual sample can have more than one associated peakset; e.g. if
-    multiple peak callers are used for comparison purposes each sample
-    would have more than one line in the sample sheet.
-
-2.  **Occupancy analysis:** Peaksets, especially those generated by peak
-    callers, provide an insight into the potential occupancy of the
-    protein being ChIPed for at specific genomic loci. After the
-    peaksets have been loaded, it can be useful to perform some
-    exploratory plotting to determine how these occupancy maps agree
-    with each other, e.g. between experimental replicates (re-doing the
-    ChIP under the same conditions), between different peak callers on
-    the same experiment, and within groups of samples representing a
-    common experimental condition. DiffBind provides functions to enable
-    overlaps to be examined, as well as functions to determine how well
-    similar samples cluster together. In addition, peaks may be filtered
-    based on published blacklists of region known to be problematic, as
-    well as custom greylists derived from control track specific to the
-    experiment (see Section 6). Beyond quality control, the product of
-    an occupancy analysis may be a consensus peakset, representing an
-    overall set of candidate binding sites to be used in further
-    analysis.
-
-3.  **Counting reads:** Once a consensus peakset has been derived,
-    DiffBind can use the supplied sequence read files to count how many
-    reads overlap each interval for each unique sample. By default, the
-    peaks in the consensus peakset are re-centered and trimmed based on
-    calculating their summits (point of greatest read overlap) in order
-    to provide more standardized peak intervals. The final result of
-    counting is a binding affinity matrix containing a read count for
-    each sample at every consensus binding site, whether or not it was
-    identified as a peak in that sample. With this matrix, the samples
-    can be re-clustered using affinity, rather than occupancy, data. The
-    binding affinity matrix is used for QC plotting as well as for
-    subsequent differential analysis.
-
-4.  **Differential binding affinity analysis:** The core functionality
-    of DiffBind is the differential binding affinity analysis, which
-    enables binding sites to be identified that are significantly
-    differentially bound between sample groups. This step includes
-    normalizing the experimental data and establishing a model design
-    and a contrast (or contrasts). Next the underlying core analysis
-    routines are executed, by default using DESeq2 . This will assign a
-    p-value and FDR to each candidate binding site indicating confidence
-    that they are differentially bound.
-
-5.  **Plotting and reporting:** Once one or more contrasts have been
-    run, DiffBind provides a number of functions for reporting and
-    plotting the results. MA and volcano plots give an overview of the
-    results of the analysis, while correlation heatmaps and PCA plots
-    show how the groups cluster based on differentially bound sites.
-    Boxplots show the distribution of reads within differentially bound
-    sites corresponding to whether they gain or lose affinity between
-    the two sample groups. A reporting mechanism enables differentially
-    bound sites to be extracted for further processing, such as
-    annotation, motif, and pathway analyses.
-
-## Reading in Peaks
-
-We will use a sample sheet to process our data. Columns names in sample
-sheet may include:
-
-1.  SampleID: Identifier string for sample. Must be unique for each
-    sample.
-2.  Tissue: Identifier string for tissue type
-3.  Factor: Identifier string for factor
-4.  Condition: Identifier string for condition
-5.  Treatment: Identifier string for treatment
-6.  Replicate: Replicate number of sample
-7.  bamReads: file path for bam file containing aligned reads for ChIP
-    sample
-8.  bamControl: file path for bam file containing aligned reads for
-    control sample
-9.  Spikein: file path for bam file containing aligned spike-in reads
-10. ControlID: Identifier string for control sample
-11. Peaks: path for file containing peaks for sample. Format determined
-    by PeakCaller field or caller parameter
-12. PeakCaller: Identifier string for peak caller used. If Peaks is not
-    a bed file, this will determine how the Peaks file is parsed. If
-    missing, will use default peak caller specified in caller parameter.
-    Possible values:
-
--   "raw": text file file; peak score is in fourth column
--   "bed": .bed file; peak score is in fifth column
--   "narrow": default peak.format: narrowPeaks file
--   "macs": MACS .xls file
--   "swembl": SWEMBL .peaks file
--   "bayes": bayesPeak file
--   "peakset": peakset written out using pv.writepeakset
--   "fp4": FindPeaks v4
-
-13. PeakFormat: string indicating format for peak files; see PeakCaller
-    and dba.peakset
-14. ScoreCol: column in peak files that contains peak scores
-15. LowerBetter: logical indicating that lower scores signify better
-    peaks
-16. Counts: file path for externally computed read counts
-
-For sample sheets loaded from a file, the accepted formats are
-comma-separated values (column headers, followed by one line per
-sample), or Excel-formatted spreadsheets (.xls or .xlsx extension).
-Leading and trailing white space will be removed from all values, with a
-warning.
-
-Let's load some libraries:
-
-```{r}
-#.libPaths(c( "/usr/local/lib/R/site-library", "/usr/local/lib/R/library","/users/jwalla12/R/x86_64-pc-linux-gnu-library/4.3"    ))
-
-library(DiffBind)
-library(ChIPpeakAnno)
-library(ChIPseeker)
-library(ChIPQC)
-library(magrittr)
-library(tidyr)
-```
-
-We will work with the Tamoxifen data that comes with DiffBind. Look at
-the sample sheet
-
-```{r}
-samples <- read.csv("/oscar/data/shared/databases/workshops/bootcamp_2025/DiffBind_Vignette/tamoxifen.csv")
-head(samples)
-```
-
-Read in the peakset as a DBA object:
-
-```{r}
-tamoxifen <- dba(sampleSheet=samples)
-tamoxifen
-```
-
-Using the data from the peak calls, a correlation heatmap can be
-generated which gives an initial clustering of the samples using the
-cross-correlations of each row of the binding matrix:
-
-```{r}
-plot(tamoxifen)
-```
-
-## Counting reads
-
-The next step is to calculate a binding matrix with scores based on read
-counts for every sample (affinity scores), rather than confidence scores
-for only those peaks called in a specific sample (occupancy scores).
-
-```{r}
-tamoxifen <- dba.count(tamoxifen)
-```
-
-```{r}
-tamoxifen
-```
-
-This shows that all the samples are using the same, approximately 2800
-site consensus peakset. Also, two new columns have been added. The first
-(Reads) shows the total number of aligned reads for each sample (the
-"Full" library sizes). The second is labeled FRiP, which stands for
-Fraction of Reads in Peaks. This is the proportion of reads for that
-sample that overlap a peak in the consensus peakset, and can be used to
-indicate which samples show more enrichment overall. For each sample,
-multiplying the value in the Reads column by the corresponding FRiP
-value will yield the number of reads that overlap a consensus peak. This
-can be done using the dba.show function:
-
-```{r}
-info <- dba.show(tamoxifen)
-libsizes <- cbind(LibReads=info$Reads, FRiP=info$FRiP,PeakReads=round(info$Reads * info$FRiP))
-rownames(libsizes) <- info$ID
-libsizes
-```
-
-We can also plot a new correlation heatmap based on the count scores.
-While this shows a slightly different clustering, with overall higher
-levels of correlation (due to using normalized read counts instead of
-whether or not a peak was called), responsiveness to tamoxifen treatment
-does not appear to form a basis for clustering when using all of the
-affinity scores.
-
-```{r}
-plot(tamoxifen)
-```
-
-## Blacklists
-
-You can optionally include a specific blacklist at this point. The
-difference between blacklists and greylists:
-
--   Blacklists are pre-defined lists of regions specific to a reference
-    genome that are known to be problematic. The best known lists have
-    been identified as part of the ENCODE project and are available for
-    a variety of reference genomes and genome versions. The current
-    ENCODE blacklists are available through the dba.blacklist function.
-
--   Greylists are specific to a ChIP-seq experiment, and are derived
-    from the controls generated as part of the experiment. The idea is
-    to analyze libraries that are not meant to show systematic
-    enrichment (such as Inputs, in which no anti-body is introduced),
-    and identify anomalous regions where a disproportionate degree of
-    signal is present. These regions can then be excluded from
-    subsequent analysis.
-
-DiffBind has several blacklists included (which we use later), but you
-can also use your own as long as you convert them to a GRanges object.
-We aren't including a blacklist here, but if we did it might look like
-this:
-
-```{r}
-#tamoxifen <- dba.blacklist(tamoxifen, blacklist=custom_blacklist)
-```
-
-You can even remove blacklists from your bam files before running peak
-calling using bedtools intersect (see
-https://bedtools.readthedocs.io/en/latest/content/tools/intersect.html):
-
-`bedtools intersect -v -abam yourbam -b blacklist.bed > filtered.bam`
-
-## Normalizing data
-
-Next is normalization. By default, the data are normalized based on
-sequencing depth. The DiffBind documentation has a detailed section on
-different normalization options, including suggestions for normalization
-methods for non-ChIPseq data (for example, with background normalization
-for ATACseq or with spike-in controls for cut&run).
-(https://bioconductor.org/packages/release/bioc/vignettes/DiffBind/inst/doc/DiffBind.pdf#section.7)
-
-```{r}
-tamoxifen <- dba.normalize(tamoxifen)
-```
-
-Look at the details of the normalization:
-
-```{r}
-norm <- dba.normalize(tamoxifen, bRetrieve=TRUE)
-norm
-```
-
-This shows the normalization method used (lib), the calculated
-normalization factors for each sample, and the full library sizes (which
-include the total number of reads in the associated .bam files).
-
-## Establishing a model design and contrast
-
-Before running the differential analysis, we need to tell DiffBind how
-to model the data, including which comparison(s) we are interested in.
-This is done using the dba.contrast function, as follows:
-
-```{r}
-tamoxifen <- dba.contrast(tamoxifen, reorderMeta=list(Condition="Responsive"))
-```
-
-This call will set up any "default" contrasts by examining the project
-metadata factors and assuming we want to look at the differences between
-any two sample groups with at least three replicates in each side of the
-comparison (that is, any factor that has two different values where
-there are at least three samples that share each value.) It also
-establishes the Responsive condition as the baseline, so it will be in
-the denominator of the default contrast. In the current case, there is
-only one such comparison that qualifies: The Condition metadata factor
-has two values, Resistant and Responsive, that have at least three
-replicates each (there are four Resistant sample replicates and seven
-Responsive sample replicates.) This function also establishes the
-default design, which includes only the metadata factor directly
-involved in the contrast (Condition).
-
-## Performing the differential affinity analysis
-
-Then we run the main differential analysis. If you have already included
-a blacklist or a greylist earlier in the analysis, you can use the
-arguments `bBlacklist=FALSE` or `bGreylist=FALSE`, otherwise DiffBind
-will try to find an appropriate blacklist to use.
-
-```{r}
-tamoxifen <- dba.analyze(tamoxifen)
-tamoxifen
-```
-
-In situations where you don't have replicates (not recommended), of if
-you want to compare specific groups, you will have to create masks to
-indicate which samples are which:
-
-```{r}
-#resistant<- dba.mask(tamoxifen, DBA_CONDITION, "Resistant")
-#responsive <- dba.mask(tamoxifen, DBA_CONDITION, "Responsive")
-#tamoxifen <- dba.contrast(tamoxifen, group1 = resistant, group2=responsive )
-```
-
-## Retrieving the differentially bound sites
-
-The final step is to retrieve the differentially bound sites. We only
-set a single contrast, so the contrast argument is redundant here but
-would be necessary if you specified different contrasts on the same DBA
-object.
-
-```{r}
-tamoxifen.DB <- dba.report(tamoxifen, contrast = 1)
-```
-
-The results are returned as a GRanges object, but you can convert them
-to a dataframe and filter the results:
-
-```{r}
-as.data.frame(tamoxifen.DB) %>% dplyr::filter(FDR <= .05) %>% dplyr::filter(Fold > 1)
-```
-
-# Plotting in DiffBind
-
-Besides the correlation heatmaps we have been looking at, a number of
-other plots are available using the affinity data. This section covers
-Venn diagrams, MA plots, Volcano plots, PCA plots, Boxplots, and
-Heatmaps.
-
-## Venn diagrams
-
-Venn diagrams illustrate overlaps between different sets of peaks. For
-example, amongst the differentially bound sites, we can see the
-differences between the "Gain" sites (those that increase binding
-enrichment in the Resistant condition) and the "Loss" sites (those with
-lower enrichment) as follows:
-
-```{r}
-dba.plotVenn(tamoxifen, contrast=1, bDB=TRUE,bGain=TRUE, bLoss=TRUE, bAll=FALSE)
-```
-
-## PCA plots
-
-While the correlation heatmaps already seen are good for showing
-clustering, plots based on principal components analysis can be used to
-give a deeper insight into how samples are associated.
-
-```{r}
-dba.plotPCA(tamoxifen,DBA_TISSUE,label=DBA_CONDITION)
-```
-
-## MA plots
-
-MA plots are a useful way to visualize the relationship between the
-overall binding level at each site and the magnitude of the change in
-binding enrichment between conditions, as well as the effect of
-normalization on data. An MA plot can be obtained for the Resistant vs
-Responsive contrast as follows:
-
-```{r}
-dba.plotMA(tamoxifen, contrast = 1)
-```
-
-Each point represents a binding site, with the points in magenta
-representing sites identified as differentially bound. There is a blue
-horizontal line through the origin (0 LFC), as well as a horizontal red
-curve representing a non-linear loess fit showing the underlying
-relationship between coverage levels and fold changes. The plot shows
-how the differentially bound sites appear to have a minimum absolute log
-fold difference of somewhere between one and two. As we have already
-seen, it also shows that more ERa binding sites lose binding affinity in
-the tamoxifen resistant condition than gain binding affinity, as
-evidenced by more red dots below the center line than are above it. This
-same data can also be shown with the concentrations of each sample
-groups plotted against each other plot using dba.plotMA(tamoxifen,
-bXY=TRUE)
-
-## Volcano plots
-
-Similar to MA plots, Volcano plots also highlight significantly
-differentially bound sites and show their fold changes. Here, however,
-the confidence statistic (FDR or p-value) is shown on a negative log
-scale, helping visualize the relationship between the magnitude of fold
-changes and the confidence that sites are differentially bound.
-
-```{r}
-dba.plotVolcano(tamoxifen)
-```
-
-Volcano plot of Resistant-Responsive contrast. Sites identified as
-significantly differentially bound shown in red.
-
-## Boxplots
-
-Boxplots provide a way to view how read distributions differ between
-classes of binding sites. Consider the example, where 311 differentially
-bound sites are identified. The MA plot shows that these are not
-distributed evenly between those that increase binding affinity in the
-Responsive group vs. those that increase binding affinity in the
-Resistant groups. This can be seen quantitatively using the sites
-returned in the report:
-
-```{r}
-sum(tamoxifen.DB$Fold<0)
-sum(tamoxifen.DB$Fold>0)
-```
-
-But how are reads distributed amongst the different classes of
-differentially bound sites and sample groups? These data can be more
-clearly seen using a boxplot:
-
-```{r}
-dba.plotBox(tamoxifen)
-```
-
-Box plots of read distributions for significantly differentially bound
-(DB) sites. Tamoxifen Resis- tant samples are shown in blue, and
-Responsive samples are shown in red. Left two boxes show distribution of
-reads over all DB sites in the Resistant and Responsive groups; middle
-two boxes show distributions of reads in DB sites that increase in
-affinity in the Resistant group; last two boxes show distributions of
-reads in DB sites that increase in affinity in the Responsive group.
-
-## Heatmaps
-
-DiffBind provides two types of heatmaps. This first, correlation
-heatmaps, we have already seen:
-
-```{r}
-dba.plotHeatmap(tamoxifen)
-```
-
-Another way to view the patterns of binding affinity directly in the
-differentially bound sites is via a binding affinity heatmap, showing
-the read scores for some or all of the binding sites. This can be
-plotted for the example case as follows
-
-```{r}
-hmap <- colorRampPalette(c("#fc8d59", "#ffffbf", "#91bfdb"))(n = 13)
-dba.plotHeatmap(tamoxifen, contrast=1, correlations=FALSE, scale="row", colScheme = hmap)
-```
-
-The heatmap shows the affinities and clustering of the differentially
-bound sites (rows), as well as the sample clustering (columns). In this
-case, the (normalized) counts have been row scaled, and a
-colorblind-safe heatmap color palette applied
-
-## Profile plots
-
-The dba.plotProfile() function enables the computation of peakset
-profiles and the plot- ting of complex heatmaps. It serves as a
-front-end to enable experiments analyzed using DiffBind to more easily
-use the profiling and plotting functionality provided by the profileplyr
-package written by Tom Carroll and Doug Barrows (see
-https://bioconductor.org/packages/ release/bioc/html/profileplyr.html).
-
-Processing proceeds in two phases.
-
-In the first phase, specific peaksets are extracted from a DiffBind DBA
-object and profiles are calculated for these peaks for set of samples in
-the DiffBind experiment. Profiles are calculated by counting the number
-of overlapping reads in a series of bins upstream and downstream of each
-peak center.
-
-In the second phase, the derived profiles are plotted in a series of
-complex heatmaps showing the relative intensity of overlapping peaks in
-each bin for each peak in each sample, along with summary plots showing
-the average profile across the sites for each sample. Due to the
-computational cost of this function, it is advised that the calculation
-of profiles and the plotting be separated into two calls, so that the
-profiles do not need to be re- generated if something goes wrong in the
-plotting.
-
-By default, when a DBA object is passed in to generate profiles,
-plotting is turned off and a profileplyr object is returned. When
-dba.plotProfile() is called with a profileplyr object, a plot is
-generated by default. The main aspects of the profile plot are which
-samples are plotted (the X-axis) and which sites are plotted (the
-Y-axis). These can be specified in a number of flexible ways. Other pa-
-rameters to dba.plotProfile() determine how the data are treated,
-controlling aspects such as how many sites are included in the plot,
-data normalization, sample merging (computing mean profiles for groups
-of samples), and control over the appearance of the plot.
-
-See section 4.7 of the DiffBind docs for more details:
-https://bioconductor.org/packages/release/bioc/vignettes/DiffBind/inst/doc/DiffBind.pdf
-
-```{r}
-profiles <- dba.plotProfile(tamoxifen)
-dba.plotProfile(profiles)
-```
-
-If an analysis has been completed, the default plot will be based on the
-results of the first contrast. If the contrast compares two conditions,
-all of the samples in each condition will be included, with the heatmaps
-colored separately for samples in each contrast condition.
-
-Sample groups are merged based on the DBA_REPLICATE attribute, such that
-each sample class will have one heatmap based on the normalized mean
-read counts for all the samples in that class that have the same
-metadata except for the Replicate number
-
-In terms of sites, two groups of differentially bound sites are
-included: Gain sites (with positive fold change) and Loss sites
-(negative fold change). If there are more than 1,000 sites in either
-category, the 1,000 sites with the great absolute value fold change will
-be included (the maximum number of sites to be profiled can be altered).
-
-This plot shows how the differentially bound sites are divided into Gain
-and Loss groups, and how sample groups belonging to each of the two
-contrast conditions (Resistant and Responsive) result in differently
-colored heatmaps.
-
-## Peak annotation with ChIPseeker
-
-Now that we have a list of differential peaks, we might want to put our
-peaks into context by determining their location on the genome relative
-to genes or other features. We will use ChIPseeker, but you could also
-use ChIPpeakAnno
-(https://www.bioconductor.org/packages/release/bioc/html/ChIPpeakAnno.html)
-or ChIPQC
-(https://www.bioconductor.org/packages/release/bioc/html/ChIPQC.html).
-
-A TxDb object connects a set of genomic coordinates to
-transcript-oriented features. It also contains feature IDs for
-transcripts and genes so TxDb objects can be used to link gene IDs and
-transcript IDs.
-
-```{r}
-library(TxDb.Hsapiens.UCSC.hg19.knownGene)
-txdb <- TxDb.Hsapiens.UCSC.hg19.knownGene
-```
-
-An OrgDb is an organism-specific, genome wide annotation. We can use it
-to map between different gene ID types using a central identifier
-(usually Entrez gene ID). OrgDb names are always of the form:
-org.Ab.id.db (e.g. org.Sc.sgd.db) where Ab is a 2-letter abbreviation of
-the organism and id is an abbreviation (in lower-case) describing the
-type of central identifier (`eg` for Entrez Gene ids)
-
-```{r}
-library(org.Hs.eg.db)
-```
-
-We can use the ChIPseeker package function annotatePeak to determine the
-structural annotations.
-
-```{r}
-peakAnno <- annotatePeak(peak = tamoxifen.DB, TxDb=txdb, annoDb = 'org.Hs.eg.db', tssRegion=c(-1000, 1000), verbose=FALSE)
-```
-
-Here we are annotating only the significant peaks from the Tamoxifen
-contrasts, but in theory we could annotate the entire consensus peakset
-like this:
-
-```{r}
-consensus <- dba(tamoxifen, tamoxifen$masks$Consensus, minOverlap=1)
-consensus.peaks <- dba.peakset(consensus, bRetrieve=TRUE)
-consensus_peakAnno <- annotatePeak(peak = consensus.peaks, TxDb=txdb, annoDb = 'org.Hs.eg.db',  tssRegion=c(-1000, 1000), verbose=FALSE, columns = c("ENTREZID", "ENSEMBL", "SYMBOL", "GENENAME"))
-
-```
-
-Then visualize the results as a pie or bar chart:
-
-```{r}
-plotAnnoBar(peakAnno)
-plotAnnoPie(peakAnno)
-```
-
-We can also visualize the distance to TSS
-
-```{r}
-plotDistToTSS(peakAnno, title="Distribution of transcription factor-binding loci\nrelative to TSS")
-```
-
-If we convert the peakAnno object to a dataframe, we can see lots of
-additional information. This includes the peak locations, concentration
-of reads in peaks in the Resistant and Responsive condition, statistical
-information, information about the peak structural annotation, and
-information about the nearest gene TSS and the distance between the peak
-and the TSS.
-
-```{r}
-peakAnno_df <- as.data.frame(peakAnno)
-peakAnno_df %>% dplyr::filter(abs(distanceToTSS) <= 5000)
-```
-
-We can use this information to run enrichment analysis:
-
-```{r}
-pathway1 <- enrichPathway(as.data.frame(peakAnno)$geneId)
-pathway1
-dotplot(pathway1)
-```
