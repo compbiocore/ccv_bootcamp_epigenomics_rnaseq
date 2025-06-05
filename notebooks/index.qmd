@@ -24,7 +24,7 @@ Fill in the fields as follows:
 -   `Partition`: leave blank\
 -   `Number of hours`: 2\
 -   `Num Cores`: 1\
--   `Memory`: 20\
+-   `Memory`: 40\
 -   `Singularity Container Path`:/oscar/data/shared/databases/workshops/bootcamp_2025/ccv_bootcamp_epigenomics_rnaseq/ccv_bootcamp_epigenomics_rnaseq.sif\
 -   `Package install Path`: leave blank\
 -   `Path for R Executable`: \~/scratch\
